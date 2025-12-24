@@ -1,0 +1,104 @@
+/* Word文档预览样式 */
+.docx-preview-container {
+  max-width: 100%;
+  margin: 0 auto;
+  overflow: auto;
+}
+
+.docx-container {
+  padding: 20px;
+  background-color: #fff;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+  border-radius: 4px;
+  margin-bottom: 20px;
+}
+
+.docx-wrapper {
+  max-width: 820px;
+  margin: 0 auto;
+  background-color: #fff;
+  padding: 40px;
+}
+
+.docx-wrapper > section {
+  background-color: #fff;
+  margin-bottom: 36px;
+  page-break-after: always;
+  position: relative;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+}
+
+.docx-wrapper > section:last-child {
+  page-break-after: avoid;
+}
+
+.docx-wrapper > section > * {
+  position: relative;
+}
+
+/* 覆盖默认样式以适应我们的设计 */
+.docx-container * {
+  box-sizing: border-box;
+  -webkit-font-smoothing: antialiased;
+}
+
+.docx-container p {
+  margin: 0 0 10px;
+  line-height: 1.5;
+}
+
+.docx-container h1, .docx-container h2, .docx-container h3, .docx-container h4, .docx-container h5, .docx-container h6 {
+  margin: 20px 0 10px;
+  font-weight: bold;
+}
+
+.docx-container h1 {
+  font-size: 2em;
+}
+
+.docx-container h2 {
+  font-size: 1.5em;
+}
+
+.docx-container h3 {
+  font-size: 1.17em;
+}
+
+.docx-container table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 10px 0;
+}
+
+.docx-container table td, .docx-container table th {
+  border: 1px solid #ddd;
+  padding: 8px;
+}
+
+.docx-container table th {
+  background-color: #f2f2f2;
+  font-weight: bold;
+}
+
+.docx-container ul, .docx-container ol {
+  margin: 10px 0;
+  padding-left: 40px;
+}
+
+.docx-container li {
+  margin: 5px 0;
+}
+
+.docx-container img {
+  max-width: 100%;
+  height: auto;
+}
+
+.docx-container a {
+  color: #0066cc;
+  text-decoration: underline;
+}
+
+.docx-container a:hover {
+  color: #004499;
+}

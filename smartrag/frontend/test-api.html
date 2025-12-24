@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API测试</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .test-section {
+            margin-bottom: 30px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        button {
+            padding: 10px 15px;
+            margin: 5px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .result {
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            white-space: pre-wrap;
+        }
+        input {
+            padding: 8px;
+            margin: 5px;
+            width: 200px;
+        }
+    </style>
+</head>
+<body>
+    <h1>API测试页面</h1>
+    
+    <div class="test-section">
+        <h2>发送验证码测试</h2>
+        <input type="email" id="testEmail" placeholder="测试邮箱" value="test@example.com">
+        <button onclick="testSendVerificationCode()">发送验证码</button>
+        <div id="sendCodeResult" class="result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>获取公共角色测试</h2>
+        <button onclick="testGetPublicRoles()">获取角色列表</button>
+        <div id="getRolesResult" class="result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>注册测试</h2>
+        <input type="text" id="regUsername" placeholder="用户名" value="testuser">
+        <input type="password" id="regPassword" placeholder="密码" value="Test123!@#">
+        <input type="email" id="regEmail" placeholder="邮箱" value="test@example.com">
+        <input type="text" id="regCode" placeholder="验证码" value="123456">
+        <input type="number" id="regRoleId" placeholder="角色ID" value="2">
+        <button onclick="testRegister()">注册</button>
+        <div id="registerResult" class="result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>登录测试</h2>
+        <input type="email" id="loginEmail" placeholder="邮箱" value="test@example.com">
+        <input type="password" id="loginPassword" placeholder="密码" value="Test123!@#">
+        <button onclick="testLogin()">登录</button>
+        <div id="loginResult" class="result"></div>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'http://localhost:9090';
+        
+        function logResult(elementId, message, data = null) {
+            const element = document.getElementById(elementId);
+            const timestamp = new Date().toLocaleTimeString();
+            let content = `[${timestamp}] ${message}\n`;
+            if (data) {
+                content += JSON.stringify(data, null, 2);
+            }
+            element.textContent = content;
+        }
+        
+        async function testSendVerificationCode() {
+            const email = document.getElementById('testEmail').value;
+            logResult('sendCodeResult', '发送验证码请求中...', { email });
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/v1/auth/send-verification-code`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ email }),
+                });
+                
+                const data = await response.json();
+                logResult('sendCodeResult', `响应状态: ${response.status}`, data);
+            } catch (error) {
+                logResult('sendCodeResult', '请求失败', { error: error.message });
+            }
+        }
+        
+        async function testGetPublicRoles() {
+            logResult('getRolesResult', '获取公共角色请求中...');
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/v1/users/public/roles`, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                });
+                
+                const data = await response.json();
+                logResult('getRolesResult', `响应状态: ${response.status}`, data);
+            } catch (error) {
+                logResult('getRolesResult', '请求失败', { error: error.message });
+            }
+        }
+        
+        async function testRegister() {
+            const username = document.getElementById('regUsername').value;
+            const password = document.getElementById('regPassword').value;
+            const email = document.getElementById('regEmail').value;
+            const verification_code = document.getElementById('regCode').value;
+            const role_ids = [parseInt(document.getElementById('regRoleId').value)];
+            
+            logResult('registerResult', '注册请求中...', { username, email, role_ids });
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/v1/auth/register`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ username, password, email, verification_code, role_ids }),
+                });
+                
+                const data = await response.json();
+                logResult('registerResult', `响应状态: ${response.status}`, data);
+            } catch (error) {
+                logResult('registerResult', '请求失败', { error: error.message });
+            }
+        }
+        
+        async function testLogin() {
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+            
+            logResult('loginResult', '登录请求中...', { email });
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/v1/auth/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ email, password }),
+                });
+                
+                const data = await response.json();
+                logResult('loginResult', `响应状态: ${response.status}`, data);
+            } catch (error) {
+                logResult('loginResult', '请求失败', { error: error.message });
+            }
+        }
+    </script>
+</body>
+</html>

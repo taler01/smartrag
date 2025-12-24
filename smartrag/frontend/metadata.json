@@ -1,0 +1,5 @@
+{
+  "name": "SmartRAG - 智能知识库",
+  "description": "基于 Gemini 的前端 RAG 搜索界面，支持角色权限管理与文档问答。",
+  "requestFramePermissions": []
+}
