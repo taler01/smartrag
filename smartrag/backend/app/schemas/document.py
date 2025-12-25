@@ -112,3 +112,29 @@ class DocumentProcessResponse(BaseModel):
     processed_count: int
     failed_count: int
     failed_documents: List[int] = []  # 处理失败的文档ID列表
+
+
+class DocumentDetailResponse(BaseModel):
+    """文档详细信息响应模型"""
+    id: int
+    filename: str
+    file_path: str
+    file_size: int
+    file_type: str
+    file_hash: str
+    minio_filename: Optional[str] = None
+    file_url: Optional[str] = None
+    title: Optional[str] = None
+    description: Optional[str] = None
+    is_active: bool
+    is_processed: bool
+    upload_time: datetime
+    created_at: datetime
+    updated_at: datetime
+    document_type: str  # "public" 或 "personal"
+    uploader_id: Optional[int] = None  # 公共文档的上传者ID
+    owner_id: Optional[int] = None  # 个人文档的所有者ID
+    permissions: Optional[List[int]] = None  # 角色ID列表(仅公共文档)
+    
+    class Config:
+        from_attributes = True

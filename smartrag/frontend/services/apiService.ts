@@ -461,6 +461,8 @@ export interface ChatMessageRequest {
   user_role?: string;
   user_id?: string;
   conversation_id?: string;
+  knowledge_retrieval?: boolean;
+  knowledge_name?: string;
 }
 
 // 文档上传请求接口
@@ -735,6 +737,13 @@ export const streamChatMessage = async (
   const { maxRetries = 2, retryDelay = 1000 } = options;
   let retryCount = 0;
 
+  // 获取认证令牌
+  const token = localStorage.getItem('token');
+  if (!token) {
+    onError(new Error('用户未登录，请重新登录'));
+    return;
+  }
+
   const attemptStream = async (): Promise<void> => {
     try {
       console.log('Starting stream request to:', `${API_BASE_URL}/api/v1/chat/stream`);
@@ -746,6 +755,7 @@ export const streamChatMessage = async (
           'Content-Type': 'application/json',
           'Accept': 'text/plain', // 明确接受SSE格式
           'Cache-Control': 'no-cache',
+          'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify(request),
       });
@@ -1103,13 +1113,20 @@ export const saveConversationMessage = async (
   conversationId: string,
   message: {
     id: string;
-    role: 'user' | 'model';
+    role: 'user' | 'model' | 'assistant';
     text: string;
     timestamp: Date;
   },
   token: string
 ): Promise<ConversationMessage> => {
   try {
+    const content = message.text || '';
+    
+    if (!content.trim()) {
+      console.warn('跳过空消息:', message);
+      throw new Error('消息内容不能为空');
+    }
+    
     const response = await fetch(`${API_BASE_URL}/api/v1/conversations/${conversationId}/messages`, {
       method: 'POST',
       headers: {
@@ -1118,7 +1135,7 @@ export const saveConversationMessage = async (
       },
       body: JSON.stringify({
         role: message.role === 'model' ? 'assistant' : message.role,
-        content: message.text
+        content: content.trim()
       }),
     });
 

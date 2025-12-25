@@ -1,12 +1,15 @@
 from typing import List, Dict, Any, Optional, AsyncGenerator
 import asyncio
 import random
+import httpx
 from datetime import datetime
 from openai import AsyncOpenAI
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.config import settings
 from app.utils.logger import logger
 from app.services.session_manager import user_session_manager
+from app.database import get_db_context
+from app.models.document import PublicDocument, PersonalDocument
 
 
 class ChatService:
@@ -19,6 +22,9 @@ class ChatService:
             base_url=settings.siliconflow_base_url
         )
         self.model = settings.siliconflow_model
+        
+        # RAG API 配置
+        self.rag_api_url = "http://10.168.27.191:8888/rag/query"
         
         # 备用模拟回复（当 API 不可用时使用）
         self.simulation_responses = [
@@ -142,13 +148,114 @@ class ChatService:
                 timestamp=datetime.now()
             )
     
+    async def _call_rag_api(self, query: str, knowledge_name: str) -> dict:
+        """调用 RAG API 进行知识检索"""
+        try:
+            logger.info(f"调用 RAG API: query={query[:50]}..., knowledge_name={knowledge_name}")
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    self.rag_api_url,
+                    data={
+                        "query": query,
+                        "knowledge_name": knowledge_name
+                    }
+                )
+                response.raise_for_status()
+                result = response.json()
+                
+                logger.info(f"RAG API 返回结果: {result}")
+                
+                status = result.get("status", "")
+                data = result.get("data", {})
+                
+                if not isinstance(data, dict):
+                    logger.error(f"RAG API 返回的 data 不是字典类型: {type(data)}")
+                    return {
+                        "status": status,
+                        "context": "",
+                        "references": []
+                    }
+                
+                chunks = data.get("chunks", [])
+                # references = data.get("references", [])
+                
+                if not isinstance(chunks, list):
+                    logger.error(f"RAG API 返回的 chunks 不是列表类型: {type(chunks)}")
+                    return {
+                        "status": status,
+                        "context": "",
+                        "references": []
+                    }
+                
+                if len(chunks) == 0:
+                    logger.warning(f"RAG 检索未找到相关内容，status: {status}")
+                    return {
+                        "status": status,
+                        "context": "",
+                        "references": []
+                    }
+                
+                rag_contents, rag_files = [], []
+                chunks_selected = chunks[:3] if len(chunks) > 3 else chunks
+                unique_files = set()
+                
+                for i, chunk in enumerate(chunks_selected):
+                    content = chunk.get("content", "")
+                    file_path = chunk.get("file_path", "")
+                    if content:
+                        rag_contents.append(f"文献[{i+1}]:{content}")
+                    if file_path and file_path not in unique_files:
+                        unique_files.add(file_path)
+                        original_filename = await self._get_filename_by_minio_name(file_path)
+                        display_filename = original_filename if original_filename else file_path
+                        rag_files.append(f"文献[{i+1}]:{display_filename}")
+                
+                rag_context = "\n\n".join(rag_contents)
+                logger.info(f"RAG 检索成功，找到 {len(rag_contents)} 个相关内容片段，{len(rag_files)} 个唯一参考文献")
+                
+                return {
+                    "status": status,
+                    "context": rag_context,
+                    "references": rag_files
+                }
+        except Exception as e:
+            logger.error(f"调用 RAG API 失败: {str(e)}")
+            return {
+                "status": "error",
+                "context": "",
+                "references": []
+            }
+    
+    async def _get_filename_by_minio_name(self, minio_filename: str) -> Optional[str]:
+        """根据 MinIO 文件名查询原始文件名"""
+        if not minio_filename:
+            return None
+        
+        try:
+            with get_db_context() as db:
+                public_doc = db.query(PublicDocument).filter(PublicDocument.minio_filename == minio_filename).first()
+                if public_doc:
+                    return public_doc.filename
+                
+                personal_doc = db.query(PersonalDocument).filter(PersonalDocument.minio_filename == minio_filename).first()
+                if personal_doc:
+                    return personal_doc.filename
+                
+                return None
+        except Exception as e:
+            logger.error(f"查询文件名失败: {str(e)}")
+            return None
+    
     async def process_message_with_history(
         self, 
         message: str, 
         history: List[Dict[str, Any]] = None,
         user_role: str = "admin",
         user_id: int = None,
-        conversation_id: str = None
+        conversation_id: str = None,
+        knowledge_retrieval: bool = False,
+        knowledge_name: str = None
     ) -> str:
         """
         处理带有历史记录的消息
@@ -159,6 +266,8 @@ class ChatService:
             user_role: 用户角色
             user_id: 用户ID
             conversation_id: 会话ID
+            knowledge_retrieval: 是否启用知识检索
+            knowledge_name: 知识库名称
             
         Returns:
             str: 回复文本
@@ -167,6 +276,22 @@ class ChatService:
             # 记录请求
             logger.info(f"处理消息: {message[:50]}...")
             logger.info(f"用户ID: {user_id}, 会话ID: {conversation_id}, 用户角色: {user_role}")
+            logger.info(f"知识检索: {knowledge_retrieval}, 知识库名称: {knowledge_name}")
+            
+            rag_context = ""
+            
+            # 如果启用了知识检索，调用 RAG API
+            if knowledge_retrieval and knowledge_name:
+                try:
+                    rag_result = await self._call_rag_api(message, knowledge_name)
+                    rag_context = rag_result.get("context", [])
+                    rag_files = rag_result.get("references", [])
+                    if rag_context:
+                        logger.info(f"RAG 检索成功，状态: {rag_result.get('status')}, 上下文长度: {len(rag_context)}, {len(rag_result.get('references', []))} 个引用")
+                    else:
+                        logger.warning(f"RAG 检索返回空结果，状态: {rag_result.get('status')}")
+                except Exception as e:
+                    logger.error(f"RAG 检索失败: {str(e)}")
             
             # 如果提供了用户ID，使用会话管理器获取历史记录
             if user_id is not None:
@@ -202,6 +327,10 @@ class ChatService:
             else:
                 logger.warning("未提供用户ID，无法使用会话管理器")
                 messages = self._prepare_messages(message, history)
+            
+            # 如果有 RAG 上下文，添加到系统提示中
+            if rag_context and rag_files:
+                messages[0]["content"] = f"你是一个智能助手，请根据用户的问题和以下知识库内容提供准确、有用的回答。\n\n知识库内容：\n{rag_context}\n知识库里面的图片能用尽量用上，图文并茂，尽量避免全是文字\n请基于以上知识库内容回答用户的问题。回答完问题后，请在回答尾部直接添加以下参考文献文本，不要重新格式化或修改参考文献：\n\n**参考文献：**\n{chr(10).join(rag_files)}\n\n注意：知识库内容中可能包含Markdown格式的图片链接（如![图片描述](图片URL)），请务必在回答中保留这些图片链接，不要删除或修改它们。"
             
             try:
                 # 调用 LLM API
@@ -243,7 +372,9 @@ class ChatService:
         history: List[Dict[str, Any]] = None,
         user_role: str = "admin",
         user_id: int = None,
-        conversation_id: str = None
+        conversation_id: str = None,
+        knowledge_retrieval: bool = False,
+        knowledge_name: str = None
     ) -> AsyncGenerator[str, None]:
         """
         流式生成回复
@@ -254,6 +385,8 @@ class ChatService:
             user_role: 用户角色
             user_id: 用户ID
             conversation_id: 会话ID
+            knowledge_retrieval: 是否启用知识检索
+            knowledge_name: 知识库名称
             
         Yields:
             str: 回复文本片段
@@ -262,6 +395,23 @@ class ChatService:
             # 记录请求
             logger.info(f"开始流式处理消息: {message[:50]}...")
             logger.info(f"用户ID: {user_id}, 会话ID: {conversation_id}, 用户角色: {user_role}")
+            logger.info(f"知识检索: {knowledge_retrieval}, 知识库名称: {knowledge_name}")
+            
+            rag_context = ""
+            
+            # 如果启用了知识检索，调用 RAG API
+            if knowledge_retrieval and knowledge_name:
+                try:
+                    rag_result = await self._call_rag_api(message, knowledge_name)
+                    rag_context = rag_result.get("context", [])
+                    rag_files = rag_result.get("references", [])
+                    
+                    if rag_context:
+                        logger.info(f"RAG 检索成功，状态: {rag_result.get('status')}, 上下文长度: {len(rag_context)}, {len(rag_result.get('references', []))} 个引用")
+                    else:
+                        logger.warning(f"RAG 检索返回空结果，状态: {rag_result.get('status')}")
+                except Exception as e:
+                    logger.error(f"RAG 检索失败: {str(e)}")
             
             # 如果提供了用户ID，使用会话管理器获取历史记录
             if user_id is not None:
@@ -297,6 +447,10 @@ class ChatService:
             else:
                 logger.warning("未提供用户ID，无法使用会话管理器")
                 messages = self._prepare_messages(message, history)
+            
+            # 如果有 RAG 上下文，添加到系统提示中
+            if rag_context and rag_files:
+                messages[0]["content"] = f"你是一个智能助手，请根据用户的问题和以下知识库内容提供准确、有用的回答。\n\n知识库内容：\n{rag_context}\n知识库里面的图片能用尽量用上，图文并茂，尽量避免全是文字\n请基于以上知识库内容回答用户的问题。回答完问题后，请在回答尾部直接添加以下参考文献文本，不要重新格式化或修改参考文献：\n\n**参考文献：**\n{chr(10).join(rag_files)}\n\n注意：知识库内容中可能包含Markdown格式的图片链接（如![图片描述](图片URL)），请务必在回答中保留这些图片链接，不要删除或修改它们。"
             
             # 收集完整的回复文本，以便后续添加到会话
             full_response = ""

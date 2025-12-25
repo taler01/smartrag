@@ -111,8 +111,9 @@ function App() {
         content: '',
         uploadDate: new Date(doc.upload_time),
         size: doc.file_size,
-        permissions: doc.permissions || [], // 使用后端返回的权限
-        knowledgeBaseType: 'public' as const
+        permissions: doc.permissions || [],
+        knowledgeBaseType: 'public' as const,
+        is_processed: doc.is_processed
       }));
       
       const convertedPersonalDocs = personalDocs.map(doc => ({
@@ -121,8 +122,9 @@ function App() {
         content: '',
         uploadDate: new Date(doc.upload_time),
         size: doc.file_size,
-        permissions: doc.permissions || [], // 使用后端返回的权限
-        knowledgeBaseType: 'personal' as const
+        permissions: doc.permissions || [],
+        knowledgeBaseType: 'personal' as const,
+        is_processed: doc.is_processed
       }));
       
       // 合并文档列表
@@ -243,7 +245,19 @@ function App() {
     
     try {
       for (const msg of messages) {
-        await saveConversationMessage(id, msg, token);
+        const messageContent = msg.text || msg.content || '';
+        
+        if (!messageContent.trim()) {
+          console.warn('跳过空消息:', msg);
+          continue;
+        }
+        
+        await saveConversationMessage(id, {
+          id: msg.id,
+          role: msg.role,
+          text: messageContent,
+          timestamp: msg.timestamp
+        }, token);
       }
       
       const isFirstMessage = !conversations[id] || conversations[id].messageCount === 0;
@@ -283,6 +297,7 @@ function App() {
         id: msg.id,
         role: msg.role === 'assistant' ? 'model' : 'user',
         text: msg.content,
+        content: msg.content,
         timestamp: new Date(msg.created_at)
       }));
       

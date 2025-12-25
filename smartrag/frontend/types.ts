@@ -1,10 +1,19 @@
 export enum UserRole {
-  ADMIN = "ADMIN",
-  R_AND_D = "R_AND_D",
-  AFTER_SALES = "AFTER_SALES", 
-  PRE_SALES = "PRE_SALES",
-  QA = "QA",
-  OPS = "OPS"
+  ADMIN = 'ADMIN',
+  R_AND_D = 'R_AND_D',
+  QA = 'QA',
+  OPS = 'OPS',
+  PRE_SALES = 'PRE_SALES',
+  AFTER_SALES = 'AFTER_SALES'
+}
+
+export interface User {
+  id: number;
+  username: string;
+  email: string;
+  role: string;
+  role_ids?: number[];
+  roles?: Role[];
 }
 
 export interface Role {
@@ -12,27 +21,19 @@ export interface Role {
   role_code: string;
   role_name: string;
   description?: string;
-  is_active: boolean;
+  is_active?: boolean;
   created_at?: string;
   updated_at?: string;
 }
 
 export const ROLE_LABELS: Record<string, string> = {
-  "ADMIN": '系统管理员',
-  "R_AND_D": '研发工程师',
-  "AFTER_SALES": '售后支持',
-  "PRE_SALES": '售前咨询',
-  "QA": '测试工程师',
-  "OPS": '运维工程师'
+  'ADMIN': '管理员',
+  'R_AND_D': '研发',
+  'QA': '测试',
+  'OPS': '运维',
+  'PRE_SALES': '售前',
+  'AFTER_SALES': '售后'
 };
-
-export interface User {
-  id: string;
-  username: string;
-  role_ids: number[];  // 支持多角色
-  roles?: Role[];      // 角色详细信息
-  primaryRole?: string; // 主角色代码（兼容字段）
-}
 
 export interface Document {
   id: string;
@@ -42,43 +43,89 @@ export interface Document {
   size: number;
   permissions: number[]; // List of role IDs allowed to access this document
   knowledgeBaseType?: 'public' | 'personal'; // 知识库类型：公共知识库或个人知识库
+  is_processed?: boolean; // 文档是否已处理（向量化等）
+}
+
+export interface KnowledgeBase {
+  id: string;
+  name: string;
+  description: string;
+  documentCount: number;
+  type: 'public' | 'personal';
+  createdAt: Date;
 }
 
 export interface ChatMessage {
   id: string;
-  role: 'user' | 'model';
-  text: string;
+  role: 'user' | 'assistant' | 'model';
+  text?: string;
+  content?: string;
   timestamp: Date;
-  isThinking?: boolean;
+  documentReferences?: string[];
 }
 
-export interface SearchResult {
-  answer: string;
-  sourceDocuments: string[]; // IDs of documents used
+export interface ChatSession {
+  id: string;
+  title: string;
+  messages: ChatMessage[];
+  createdAt: Date;
+  updatedAt: Date;
+  knowledgeBaseId?: string;
 }
 
-// 知识检索相关类型
+export interface DocumentInfo {
+  id: number;
+  filename: string;
+  file_path: string;
+  file_size: number;
+  file_type: string;
+  file_hash: string;
+  minio_filename?: string;
+  file_url?: string;
+  title?: string;
+  description?: string;
+  is_active: boolean;
+  is_processed: boolean;
+  upload_time: string;
+  created_at: string;
+  updated_at: string;
+  document_type: 'public' | 'personal';
+  uploader_id?: number;
+  owner_id?: number;
+  permissions?: number[];
+}
+
+export interface UploadProgress {
+  fileName: string;
+  progress: number;
+  status: 'uploading' | 'processing' | 'completed' | 'error';
+  error?: string;
+}
+
+export interface ApiResponse<T = any> {
+  success: boolean;
+  message: string;
+  data?: T;
+}
+
 export interface KnowledgeRetrievalConfig {
   enabled: boolean;
   maxDocuments: number;
   similarityThreshold: number;
 }
 
-// MCP服务相关类型
 export interface MCPService {
   id: string;
   name: string;
+  description: string;
   endpoint: string;
-  apiKey?: string;
-  description?: string;
-  isActive: boolean;
+  enabled: boolean;
   lastConnected?: Date;
-  serviceType: 'openai' | 'anthropic' | 'local' | 'custom';
 }
 
 export interface MCPServiceStatus {
   isConnected: boolean;
-  serviceName?: string;
-  lastCheck: Date;
+  serviceName: string | null;
+  lastCheck?: Date;
   error?: string;
 }

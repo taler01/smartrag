@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, Float, Enum as SQLEnum, ForeignKey
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+from sqlalchemy.dialects.mysql import DATETIME
 from app.database import Base
 import enum
 
@@ -22,9 +23,9 @@ class Conversation(Base):
     total_tokens = Column(Integer, default=0, comment="总token消耗")
     is_active = Column(Boolean, default=True, comment="是否活跃会话")
     is_deleted = Column(Boolean, default=False, comment="是否删除")
-    deleted_at = Column(DateTime, comment="删除时间")
-    created_at = Column(DateTime, default=func.now(), comment="创建时间")
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), comment="更新时间")
+    deleted_at = Column(DATETIME(fsp=3), comment="删除时间")
+    created_at = Column(DATETIME(fsp=3), server_default=func.now(), comment="创建时间")
+    updated_at = Column(DATETIME(fsp=3), server_default=func.now(), onupdate=func.now(), comment="更新时间")
     
     def __repr__(self):
         return f"<Conversation(id={self.id}, user_id={self.user_id}, title='{self.title}')>"
@@ -40,7 +41,7 @@ class ConversationMessage(Base):
     content = Column(Text, nullable=False, comment="消息内容")
     tokens = Column(Integer, default=0, comment="token数量")
     importance = Column(Float, default=1.0, comment="消息重要性")
-    created_at = Column(DateTime, default=func.now(), comment="创建时间")
+    created_at = Column(DATETIME(fsp=3), nullable=False, comment="创建时间")
     
     def __repr__(self):
         return f"<ConversationMessage(id={self.id}, conversation_id={self.conversation_id}, role={self.role})>"

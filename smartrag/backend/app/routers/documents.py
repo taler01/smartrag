@@ -1,12 +1,16 @@
 import os
 import json
+import httpx
+import asyncio
+import time
 from pathlib import Path
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status, BackgroundTasks
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from app.database import get_db
 from app.models.user import User
+from app.models.role import Role
 from app.models.document import PublicDocument, PersonalDocument, DocumentPermission
 from app.services.file_storage import file_storage_service
 from app.dependencies import get_current_user
@@ -15,7 +19,8 @@ from app.schemas.document import (
     PublicDocumentResponse, 
     PersonalDocumentResponse,
     DocumentUploadResponse,
-    DocumentListResponse
+    DocumentListResponse,
+    DocumentDetailResponse
 )
 
 router = APIRouter()
@@ -230,8 +235,23 @@ def get_public_documents(
             permission_role_ids = [perm.role_id for perm in permissions]
             
             # 创建包含权限信息的文档对象
-            doc_dict = doc.__dict__.copy()
-            doc_dict['permissions'] = permission_role_ids
+            doc_dict = {
+                'id': doc.id,
+                'filename': doc.filename,
+                'title': doc.title,
+                'description': doc.description,
+                'file_path': doc.file_path,
+                'file_size': doc.file_size,
+                'file_type': doc.file_type,
+                'file_hash': doc.file_hash,
+                'uploader_id': doc.uploader_id,
+                'upload_time': doc.upload_time,
+                'is_active': doc.is_active,
+                'is_processed': doc.is_processed,
+                'created_at': doc.created_at,
+                'updated_at': doc.updated_at,
+                'permissions': permission_role_ids
+            }
             documents_with_permissions.append(doc_dict)
         
         logger.info(f"成功获取公共文档列表: 用户ID={current_user.id}, 文档数量={len(documents_with_permissions)}")
@@ -266,8 +286,23 @@ def get_personal_documents(
         documents_with_permissions = []
         for doc in documents:
             # 个人文档没有权限控制，但为了前端一致性，添加空权限列表
-            doc_dict = doc.__dict__.copy()
-            doc_dict['permissions'] = []
+            doc_dict = {
+                'id': doc.id,
+                'filename': doc.filename,
+                'title': doc.title,
+                'description': doc.description,
+                'file_path': doc.file_path,
+                'file_size': doc.file_size,
+                'file_type': doc.file_type,
+                'file_hash': doc.file_hash,
+                'owner_id': doc.owner_id,
+                'upload_time': doc.upload_time,
+                'is_active': doc.is_active,
+                'is_processed': doc.is_processed,
+                'created_at': doc.created_at,
+                'updated_at': doc.updated_at,
+                'permissions': []
+            }
             documents_with_permissions.append(doc_dict)
         
         logger.info(f"成功获取个人文档列表: 用户ID={current_user.id}, 文档数量={len(documents_with_permissions)}")
@@ -509,6 +544,180 @@ def get_document_content(
         )
 
 
+@router.get("/{document_type}/{document_id}", response_model=DocumentDetailResponse)
+def get_document_detail(
+    document_type: str,
+    document_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    获取文档详细信息
+    """
+    logger.info(f"获取文档详细信息: 用户ID={current_user.id}, 文档类型={document_type}, 文档ID={document_id}")
+    
+    try:
+        # 验证文档类型
+        if document_type not in ["public", "personal"]:
+            logger.warning(f"无效的文档类型: {document_type} (用户ID={current_user.id})")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="文档类型必须是 'public' 或 'personal'"
+            )
+        
+        # 获取文档
+        if document_type == "public":
+            document = db.query(PublicDocument).filter(
+                PublicDocument.id == document_id,
+                PublicDocument.is_active == True
+            ).first()
+            
+            if not document:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="文档不存在"
+                )
+            
+            # 获取文档的权限角色ID列表
+            permissions = db.query(DocumentPermission.role_id).filter(
+                DocumentPermission.document_id == document_id
+            ).all()
+            permission_role_ids = [perm.role_id for perm in permissions]
+            
+            # 获取上传者信息
+            uploader = db.query(User).filter(User.id == document.uploader_id).first()
+            
+            # 详细日志输出
+            logger.info("================================================================================")
+            logger.info("【文档详细信息检索】")
+            logger.info(f"文档ID: {document.id}")
+            logger.info(f"文件名: {document.filename}")
+            logger.info(f"文件路径: {document.file_path}")
+            logger.info(f"文件大小: {document.file_size} 字节")
+            logger.info(f"文件类型: {document.file_type}")
+            logger.info(f"文件哈希: {document.file_hash}")
+            logger.info(f"MinIO文件名: {document.minio_filename or '无'}")
+            logger.info(f"文件URL: {document.file_url or '无'}")
+            logger.info(f"文档标题: {document.title or '无'}")
+            logger.info(f"文档描述: {document.description or '无'}")
+            logger.info(f"文档类型: public")
+            logger.info(f"是否激活: {'是' if document.is_active else '否'}")
+            logger.info(f"是否已处理: {'是' if document.is_processed else '否'}")
+            logger.info(f"上传时间: {document.upload_time}")
+            logger.info(f"创建时间: {document.created_at}")
+            logger.info(f"更新时间: {document.updated_at}")
+            logger.info(f"上传者信息: {{'user_id': {document.uploader_id}, 'username': {uploader.username if uploader else 'N/A'}, 'email': {uploader.email if uploader else 'N/A'}, 'role_ids': {uploader.get_role_ids() if uploader else 'N/A'}}}")
+            logger.info(f"所属部门数量: {len(permission_role_ids)}")
+            for idx, role_id in enumerate(permission_role_ids, 1):
+                role = db.query(Role).filter(Role.id == role_id).first()
+                logger.info(f"  部门{idx}:")
+                logger.info(f"    - 角色ID: {role_id}")
+                if role:
+                    logger.info(f"    - 角色代码: {role.role_code}")
+                    logger.info(f"    - 角色名称: {role.role_name}")
+                    logger.info(f"    - 角色描述: {role.description}")
+            logger.info("================================================================================")
+            
+            # 构建响应
+            detail = {
+                "id": document.id,
+                "filename": document.filename,
+                "file_path": document.file_path,
+                "file_size": document.file_size,
+                "file_type": document.file_type,
+                "file_hash": document.file_hash,
+                "minio_filename": document.minio_filename,
+                "file_url": document.file_url,
+                "title": document.title,
+                "description": document.description,
+                "is_active": document.is_active,
+                "is_processed": document.is_processed,
+                "upload_time": document.upload_time,
+                "created_at": document.created_at,
+                "updated_at": document.updated_at,
+                "document_type": "public",
+                "uploader_id": document.uploader_id,
+                "owner_id": None,
+                "permissions": permission_role_ids
+            }
+            
+            logger.info(f"成功获取公共文档详细信息: 文档ID={document_id}, 文件名={document.filename}")
+            
+        else:  # personal
+            document = db.query(PersonalDocument).filter(
+                PersonalDocument.id == document_id,
+                PersonalDocument.owner_id == current_user.id,
+                PersonalDocument.is_active == True
+            ).first()
+            
+            if not document:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="文档不存在或没有权限访问"
+                )
+            
+            # 获取所有者信息
+            owner = db.query(User).filter(User.id == document.owner_id).first()
+            
+            # 详细日志输出
+            logger.info("================================================================================")
+            logger.info("【文档详细信息检索】")
+            logger.info(f"文档ID: {document.id}")
+            logger.info(f"文件名: {document.filename}")
+            logger.info(f"文件路径: {document.file_path}")
+            logger.info(f"文件大小: {document.file_size} 字节")
+            logger.info(f"文件类型: {document.file_type}")
+            logger.info(f"文件哈希: {document.file_hash}")
+            logger.info(f"MinIO文件名: {document.minio_filename or '无'}")
+            logger.info(f"文件URL: {document.file_url or '无'}")
+            logger.info(f"文档标题: {document.title or '无'}")
+            logger.info(f"文档描述: {document.description or '无'}")
+            logger.info(f"文档类型: personal")
+            logger.info(f"是否激活: {'是' if document.is_active else '否'}")
+            logger.info(f"是否已处理: {'是' if document.is_processed else '否'}")
+            logger.info(f"上传时间: {document.upload_time}")
+            logger.info(f"创建时间: {document.created_at}")
+            logger.info(f"更新时间: {document.updated_at}")
+            logger.info(f"所有者信息: {{'user_id': {document.owner_id}, 'username': {owner.username if owner else 'N/A'}, 'email': {owner.email if owner else 'N/A'}, 'role_ids': {owner.get_role_ids() if owner else 'N/A'}}}")
+            logger.info("================================================================================")
+            
+            # 构建响应
+            detail = {
+                "id": document.id,
+                "filename": document.filename,
+                "file_path": document.file_path,
+                "file_size": document.file_size,
+                "file_type": document.file_type,
+                "file_hash": document.file_hash,
+                "minio_filename": document.minio_filename,
+                "file_url": document.file_url,
+                "title": document.title,
+                "description": document.description,
+                "is_active": document.is_active,
+                "is_processed": document.is_processed,
+                "upload_time": document.upload_time,
+                "created_at": document.created_at,
+                "updated_at": document.updated_at,
+                "document_type": "personal",
+                "uploader_id": None,
+                "owner_id": document.owner_id,
+                "permissions": None
+            }
+            
+            logger.info(f"成功获取个人文档详细信息: 文档ID={document_id}, 文件名={document.filename}")
+        
+        return detail
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取文档详细信息失败: {str(e)} (用户ID={current_user.id})")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取文档详细信息失败: {str(e)}"
+        )
+
+
 @router.delete("/public/{document_id}")
 def delete_public_document(
     document_id: int,
@@ -602,4 +811,350 @@ def delete_personal_document(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"删除个人文档失败: {str(e)}"
+        )
+
+
+async def poll_document_status(track_id: str, knowledge_name: str, document_id: int, document_type: str):
+    """
+    后台轮询文档解析状态
+    """
+    status_url = "http://10.168.27.191:8888/document/status"
+    max_attempts = 10
+    poll_interval = 30
+    
+    try:
+        for attempt in range(max_attempts):
+            try:
+                await asyncio.sleep(poll_interval)
+                
+                async with httpx.AsyncClient() as client:
+                    status_response = await client.get(
+                        status_url,
+                        params={
+                            "track_id": track_id,
+                            "knowledge_name": knowledge_name
+                        }
+                    )
+                    status_response.raise_for_status()
+                    status_result = status_response.json()
+                    logger.info(f"文档解析状态 (第{attempt + 1}次查询): {status_result}")
+                    
+                    status = status_result.get("status")
+                    
+                    if status == "completed":
+                        db = next(get_db())
+                        try:
+                            if document_type == "public":
+                                document = db.query(PublicDocument).filter(PublicDocument.id == document_id).first()
+                            else:
+                                document = db.query(PersonalDocument).filter(PersonalDocument.id == document_id).first()
+                            
+                            if document:
+                                document.is_processed = True
+                                db.commit()
+                                logger.info(f"文档解析完成，已更新处理状态: {document.filename} (ID: {document_id})")
+                            else:
+                                logger.error(f"文档不存在，无法更新处理状态: document_id={document_id}, document_type={document_type}")
+                        finally:
+                            db.close()
+                        break
+                    elif status == "failed":
+                        error_message = status_result.get("error_message") or "文档解析失败"
+                        logger.error(f"文档解析失败: {error_message}")
+                        break
+                    else:
+                        logger.info(f"文档解析中 (状态: {status})，等待下一次查询...")
+                        continue
+            except Exception as e:
+                logger.warning(f"第{attempt + 1}次查询文档解析状态失败: {str(e)}")
+                if attempt == max_attempts - 1:
+                    logger.error(f"查询文档解析状态超时: 已尝试{max_attempts}次")
+    except Exception as e:
+        logger.error(f"轮询文档状态时发生异常: {str(e)}")
+
+
+@router.post("/{document_type}/{document_id}/process")
+async def process_document(
+    background_tasks: BackgroundTasks,
+    document_type: str,
+    document_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    处理文档（向量化等）
+    预留接口，待后续实现
+    """
+    logger.info(f"处理文档请求: 用户ID={current_user.id}, 文档类型={document_type}, 文档ID={document_id}")
+    
+    try:
+        # 验证文档类型
+        if document_type not in ["public", "personal"]:
+            logger.warning(f"无效的文档类型: {document_type} (用户ID={current_user.id})")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="文档类型必须是 'public' 或 'personal'"
+            )
+        
+        # 获取文档
+        if document_type == "public":
+            document = db.query(PublicDocument).filter(
+                PublicDocument.id == document_id,
+                PublicDocument.is_active == True
+            ).first()
+            
+            if not document:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="文档不存在"
+                )
+            
+            # 获取上传者信息
+            uploader = db.query(User).filter(User.id == document.uploader_id).first()
+            
+            # 获取文档的权限角色ID列表
+            permissions = db.query(DocumentPermission.role_id).filter(
+                DocumentPermission.document_id == document_id
+            ).all()
+            permission_role_ids = [perm.role_id for perm in permissions]
+            
+            # 详细日志输出
+            logger.info("================================================================================")
+            logger.info("【文档信息检索】")
+            logger.info(f"文档ID: {document.id}")
+            logger.info(f"文件名: {document.filename}")
+            logger.info(f"文件路径: {document.file_path}")
+            logger.info(f"文件大小: {document.file_size} 字节")
+            logger.info(f"文件类型: {document.file_type}")
+            logger.info(f"文件哈希: {document.file_hash}")
+            logger.info(f"MinIO文件名: {document.minio_filename or '无'}")
+            logger.info(f"文件URL: {document.file_url or '无'}")
+            logger.info(f"文档标题: {document.title or '无'}")
+            logger.info(f"文档描述: {document.description or '无'}")
+            logger.info(f"文档类型: public")
+            logger.info(f"是否激活: {'是' if document.is_active else '否'}")
+            logger.info(f"是否已处理: {'是' if document.is_processed else '否'}")
+            logger.info(f"上传时间: {document.upload_time}")
+            logger.info(f"创建时间: {document.created_at}")
+            logger.info(f"更新时间: {document.updated_at}")
+            logger.info(f"上传者信息: {{'user_id': {document.uploader_id}, 'username': {uploader.username if uploader else 'N/A'}, 'email': {uploader.email if uploader else 'N/A'}, 'role_ids': {uploader.get_role_ids() if uploader else 'N/A'}}}")
+            logger.info(f"所属部门数量: {len(permission_role_ids)}")
+            for idx, role_id in enumerate(permission_role_ids, 1):
+                role = db.query(Role).filter(Role.id == role_id).first()
+                logger.info(f"  部门{idx}:")
+                logger.info(f"    - 角色ID: {role_id}")
+                if role:
+                    logger.info(f"    - 角色代码: {role.role_code}")
+                    logger.info(f"    - 角色名称: {role.role_name}")
+                    logger.info(f"    - 角色描述: {role.description}")
+            logger.info("================================================================================")
+                
+        else:  # personal
+            document = db.query(PersonalDocument).filter(
+                PersonalDocument.id == document_id,
+                PersonalDocument.owner_id == current_user.id,
+                PersonalDocument.is_active == True
+            ).first()
+            
+            if not document:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="文档不存在或没有权限访问"
+                )
+            
+            # 获取所有者信息
+            owner = db.query(User).filter(User.id == document.owner_id).first()
+            
+            # 详细日志输出
+            logger.info("================================================================================")
+            logger.info("【文档信息检索】")
+            logger.info(f"文档ID: {document.id}")
+            logger.info(f"文件名: {document.filename}")
+            logger.info(f"文件路径: {document.file_path}")
+            logger.info(f"文件大小: {document.file_size} 字节")
+            logger.info(f"文件类型: {document.file_type}")
+            logger.info(f"文件哈希: {document.file_hash}")
+            logger.info(f"MinIO文件名: {document.minio_filename or '无'}")
+            logger.info(f"文件URL: {document.file_url or '无'}")
+            logger.info(f"文档标题: {document.title or '无'}")
+            logger.info(f"文档描述: {document.description or '无'}")
+            logger.info(f"文档类型: personal")
+            logger.info(f"是否激活: {'是' if document.is_active else '否'}")
+            logger.info(f"是否已处理: {'是' if document.is_processed else '否'}")
+            logger.info(f"上传时间: {document.upload_time}")
+            logger.info(f"创建时间: {document.created_at}")
+            logger.info(f"更新时间: {document.updated_at}")
+            logger.info(f"所有者信息: {{'user_id': {document.owner_id}, 'username': {owner.username if owner else 'N/A'}, 'email': {owner.email if owner else 'N/A'}, 'role_ids': {owner.get_role_ids() if owner else 'N/A'}}}")
+            logger.info("================================================================================")
+        
+        # 检查文档是否已处理
+        if document.is_processed:
+            logger.info(f"文档已处理: {document.filename} (ID: {document_id})")
+            return {
+                "success": True,
+                "message": "文档已处理",
+                "document_id": document_id
+            }
+        
+        # 查询现有知识库
+        knowledge_base_url = "http://10.168.27.191:8888/knowledges"
+        try:
+            with httpx.Client() as client:
+                response = client.get(knowledge_base_url)
+                response.raise_for_status()
+                existing_knowledges = response.json()
+                logger.info(f"知识库API返回数据: {existing_knowledges}")
+                if not isinstance(existing_knowledges, list):
+                    logger.error(f"知识库API返回数据格式错误，期望列表，实际类型: {type(existing_knowledges)}")
+                    existing_knowledges = []
+            logger.info(f"现有知识库数量: {len(existing_knowledges)}")
+        except Exception as e:
+            logger.error(f"获取知识库列表失败: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"获取知识库列表失败: {str(e)}"
+            )
+        
+        # 检查并创建知识库
+        if document_type == "personal":
+            # 个人文档：检查是否有knowledge_personal知识库
+            knowledge_name = "knowledge_personal"
+            knowledge_exists = any(k == knowledge_name for k in existing_knowledges)
+            
+            if not knowledge_exists:
+                logger.info(f"创建个人知识库: {knowledge_name}")
+                try:
+                    with httpx.Client() as client:
+                        create_response = client.post(
+                            knowledge_base_url,
+                            data={
+                                "knowledge_name": knowledge_name,
+                                "knowledge_summary": "个人文档知识库"
+                            }
+                        )
+                        create_response.raise_for_status()
+                    logger.info(f"个人知识库创建成功: {knowledge_name}")
+                except Exception as e:
+                    logger.error(f"创建个人知识库失败: {str(e)}")
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail=f"创建个人知识库失败: {str(e)}"
+                    )
+            else:
+                logger.info(f"个人知识库已存在: {knowledge_name}")
+        else:
+            # 公共文档：检查是否有对应角色代码的知识库
+            permissions = db.query(DocumentPermission.role_id).filter(
+                DocumentPermission.document_id == document_id
+            ).all()
+            permission_role_ids = [perm.role_id for perm in permissions]
+            
+            for role_id in permission_role_ids:
+                role = db.query(Role).filter(Role.id == role_id).first()
+                if role and role.role_code:
+                    knowledge_name = f"knowledge_{role.role_code}"
+                    knowledge_exists = any(k == knowledge_name for k in existing_knowledges)
+                    
+                    if not knowledge_exists:
+                        logger.info(f"创建角色知识库: {knowledge_name} (角色代码: {role.role_code})")
+                        try:
+                            with httpx.Client() as client:
+                                create_response = client.post(
+                                    knowledge_base_url,
+                                    data={
+                                        "knowledge_name": knowledge_name,
+                                        "knowledge_summary": f"{role.role_name}知识库"
+                                    }
+                                )
+                                create_response.raise_for_status()
+                            logger.info(f"角色知识库创建成功: {knowledge_name}")
+                        except Exception as e:
+                            logger.error(f"创建角色知识库失败: {str(e)}")
+                            raise HTTPException(
+                                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                                detail=f"创建角色知识库失败: {str(e)}"
+                            )
+                    else:
+                        logger.info(f"角色知识库已存在: {knowledge_name}")
+        
+        # 确定知识库名称
+        if document_type == "personal":
+            knowledge_name = "knowledge_personal"
+        else:
+            # 公共文档使用第一个角色的知识库
+            permissions = db.query(DocumentPermission.role_id).filter(
+                DocumentPermission.document_id == document_id
+            ).all()
+            permission_role_ids = [perm.role_id for perm in permissions]
+            if permission_role_ids:
+                role = db.query(Role).filter(Role.id == permission_role_ids[0]).first()
+                knowledge_name = f"knowledge_{role.role_code}" if role and role.role_code else "knowledge_public"
+            else:
+                knowledge_name = "knowledge_public"
+        
+        # 调用文档解析API
+        document_upload_url = "http://10.168.27.191:8888/document/upload/url"
+        if document.file_url:
+            logger.info(f"开始解析文档: {document.filename}, URL: {document.file_url}, 知识库: {knowledge_name}")
+            try:
+                async with httpx.AsyncClient() as client:
+                    upload_response = await client.post(
+                        document_upload_url,
+                        data={
+                            "url": document.file_url,
+                            "knowledge_name": knowledge_name
+                        }
+                    )
+                    upload_response.raise_for_status()
+                    upload_result = upload_response.json()
+                    track_id = upload_result.get("track_id")
+                    message = upload_result.get("message", "")
+                    logger.info(f"文档解析请求成功: {message}, track_id: {track_id}")
+                    
+                    # 如果文档已存在且状态为completed，直接标记为已处理
+                    if "already exists" in message.lower() and "completed" in message.lower():
+                        document.is_processed = True
+                        db.commit()
+                        logger.info(f"文档已存在且已完成，直接标记为已处理: {document.filename} (ID: {document_id})")
+                    elif track_id:
+                        # 添加后台任务轮询解析进度
+                        background_tasks.add_task(
+                            poll_document_status,
+                            track_id=track_id,
+                            knowledge_name=knowledge_name,
+                            document_id=document_id,
+                            document_type=document_type
+                        )
+                    else:
+                        # track_id为None且不是已存在状态，报错
+                        error_msg = f"文档解析失败: 未获取到有效的track_id (消息: {message})"
+                        logger.error(error_msg)
+                        raise HTTPException(
+                            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail=error_msg
+                        )
+            except Exception as e:
+                logger.error(f"文档解析失败: {str(e)}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"文档解析失败: {str(e)}"
+                )
+        else:
+            logger.warning(f"文档没有file_url，跳过解析: {document.filename}")
+        
+        logger.info(f"文档处理已启动: {document.filename} (ID: {document_id})")
+        
+        return {
+            "success": True,
+            "message": "文档处理已启动",
+            "document_id": document_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"处理文档失败: {str(e)} (用户ID={current_user.id})")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"处理文档失败: {str(e)}"
         )

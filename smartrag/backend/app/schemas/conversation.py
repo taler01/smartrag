@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
 from typing import List, Optional
 from datetime import datetime
 
@@ -69,3 +69,9 @@ class CreateConversationMessageRequest(BaseModel):
     content: str
     tokens: Optional[int] = 0
     importance: Optional[float] = 1.0
+
+    @validator('content')
+    def validate_content(cls, v):
+        if not v or v.strip() == '':
+            raise ValueError('消息内容不能为空')
+        return v.strip()

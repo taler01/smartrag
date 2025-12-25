@@ -383,12 +383,28 @@ class AuthService:
                 user.last_login = datetime.utcnow() + timedelta(hours=8)
                 self.db.commit()
                 
+                # 查询用户的角色详情
+                from app.models.role import Role
+                roles = []
+                if user.role_ids:
+                    role_ids = user.get_role_ids()
+                    roles = self.db.query(Role).filter(Role.id.in_(role_ids)).all()
+                    roles = [
+                        {
+                            "id": role.id,
+                            "role_code": role.role_code,
+                            "role_name": role.role_name,
+                            "description": role.description
+                        }
+                        for role in roles
+                    ]
+                
                 # 创建令牌
                 token_data = {"sub": user.email}
                 access_token = create_access_token(token_data)
                 refresh_token = create_refresh_token(token_data)
                 
-                logger.info(f"用户登录成功: {email}")
+                logger.info(f"用户登录成功: {email}, 角色: {[r['role_code'] for r in roles]}")
                 return {
                     "success": True,
                     "access_token": access_token,
@@ -398,7 +414,8 @@ class AuthService:
                         "id": user.id,
                         "username": user.username,
                         "email": user.email,
-                        "role_ids": user.role_ids  # 返回角色ID列表
+                        "role_ids": user.role_ids,
+                        "roles": roles  # 返回完整的角色信息
                     }
                 }
             except Exception as e:

@@ -52,6 +52,17 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({
     similarityThreshold: 0.7
   });
 
+  // 根据用户角色动态设置知识库名称
+  const getDefaultKnowledgeBase = (): string => {
+    if (user.roles && user.roles.length > 0) {
+      const roleCode = user.roles[0].role_code;
+      return `knowledge_${roleCode}`;
+    }
+    return 'knowledge_public';
+  };
+
+  const [selectedKnowledgeBase, setSelectedKnowledgeBase] = useState<string>(getDefaultKnowledgeBase());
+
   // MCP服务相关状态
   const [mcpServices, setMcpServices] = useState<MCPService[]>([]);
   const [mcpServiceManagerOpen, setMcpServiceManagerOpen] = useState(false);
@@ -99,7 +110,7 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({
         id: (Date.now() + 1).toString(),
         role: 'model',
         text: `流式输出失败：${error.message}。已切换到非流式模式，请重试。`,
-        timestamp: new Date()
+        timestamp: new Date(Date.now() + 1000)
       };
       setMessages(prev => [...prev, errorMsg]);
     }
@@ -134,6 +145,13 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({
       setMessages([]);
     }
   }, [currentConversationId, externalMessages]);
+
+  // 监听用户信息变化，自动更新知识库名称
+  useEffect(() => {
+    const defaultKnowledgeBase = getDefaultKnowledgeBase();
+    setSelectedKnowledgeBase(defaultKnowledgeBase);
+    console.log('用户信息更新，知识库设置为:', defaultKnowledgeBase);
+  }, [user]);
 
   const scrollToBottom = (force = true) => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -268,7 +286,9 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({
           history: history,
           user_role: user.role_ids[0].toString(),
           user_id: user.id,
-          conversation_id: currentConversationId
+          conversation_id: currentConversationId,
+          knowledge_retrieval: knowledgeConfig.enabled,
+          knowledge_name: selectedKnowledgeBase
         }, (chunk: string) => {
           // 流式消息内容已由 useStreamingChat 钩子处理，这里不需要额外处理
           console.log('Received chunk:', chunk);
@@ -278,13 +298,22 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({
         // 因为它会在 useStreamingChat 的 onMessageComplete 或 onError 回调中处理
       } else {
         // 传统方式：调用后端API获取完整回复
-        const responseText = await generateRAGResponse(userMsg.text, documents, history, String(user.role_ids[0]), user.id, currentConversationId);
+        const responseText = await generateRAGResponse(
+          userMsg.text, 
+          documents, 
+          history, 
+          String(user.role_ids[0]), 
+          user.id, 
+          currentConversationId,
+          knowledgeConfig.enabled,
+          selectedKnowledgeBase
+        );
 
         const modelMsg: ChatMessage = {
           id: (Date.now() + 1).toString(),
           role: 'model',
           text: responseText,
-          timestamp: new Date()
+          timestamp: new Date(Date.now() + 1000)
         };
 
         setMessages(prev => {
@@ -320,13 +349,22 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({
           }));
           
           // 传统方式：调用后端API获取完整回复
-          const responseText = await generateRAGResponse(userMsg.text, documents, history, String(user.role_ids[0]));
+          const responseText = await generateRAGResponse(
+            userMsg.text, 
+            documents, 
+            history, 
+            String(user.role_ids[0]),
+            user.id,
+            currentConversationId,
+            knowledgeConfig.enabled,
+            selectedKnowledgeBase
+          );
 
           const modelMsg: ChatMessage = {
             id: (Date.now() + 1).toString(),
             role: 'model',
             text: responseText,
-            timestamp: new Date()
+            timestamp: new Date(Date.now() + 1000)
           };
 
           setMessages(prev => {
@@ -350,7 +388,7 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({
             id: (Date.now() + 1).toString(),
             role: 'model',
             text: "抱歉，处理您的请求时出现了错误，请稍后再试。",
-            timestamp: new Date()
+            timestamp: new Date(Date.now() + 1000)
           };
           setMessages(prev => [...prev, errorMsg]);
           
@@ -364,7 +402,7 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({
           id: (Date.now() + 1).toString(),
           role: 'model',
           text: "抱歉，处理您的请求时出现了错误，请稍后再试。",
-          timestamp: new Date()
+          timestamp: new Date(Date.now() + 1000)
         };
         setMessages(prev => [...prev, errorMsg]);
         
@@ -494,6 +532,25 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({
                   />
                 </button>
               </div>
+              
+              {/* 知识库选择 */}
+              {knowledgeConfig.enabled && (
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-100 rounded-lg">
+                  <span className="text-xs text-slate-600">知识库</span>
+                  <select
+                    value={selectedKnowledgeBase}
+                    onChange={(e) => setSelectedKnowledgeBase(e.target.value)}
+                    className="text-xs bg-white border border-slate-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="knowledge_personal">个人知识库</option>
+                    {user.roles && user.roles.map(role => (
+                      <option key={role.id} value={`knowledge_${role.role_code}`}>
+                        {role.role_name}知识库
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               
               {/* MCP服务状态 */}
               <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-100 rounded-lg">

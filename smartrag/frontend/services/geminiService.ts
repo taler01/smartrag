@@ -7,25 +7,36 @@ export const generateRAGResponse = async (
   history: any[] = [], 
   userRole: string = '',
   userId: string = '',
-  conversationId: string = ''
+  conversationId: string = '',
+  knowledgeRetrieval: boolean = false,
+  knowledgeName: string = ''
 ): Promise<string> => {
-  // 临时实现，返回一个简单的响应
-  console.log('generateRAGResponse called with:', { query, documents, history, userRole, userId, conversationId });
+  console.log('generateRAGResponse called with:', { query, documents, history, userRole, userId, conversationId, knowledgeRetrieval, knowledgeName });
   
-  // 始终尝试调用后端API，即使userId或conversationId为空
+  const requestBody: any = {
+    message: query,
+    history: history,
+    user_role: userRole,
+    user_id: userId || undefined,
+    conversation_id: conversationId || undefined,
+    knowledge_retrieval: knowledgeRetrieval,
+    knowledge_name: knowledgeName || undefined
+  };
+  
   try {
+    // 获取认证令牌
+    const token = localStorage.getItem('token');
+    if (!token) {
+      throw new Error('用户未登录，请重新登录');
+    }
+
     const response = await fetch(`${process.env.REACT_APP_API_BASE_URL || 'http://10.168.27.191:9090'}/api/v1/chat/simple-message`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
       },
-      body: JSON.stringify({
-        message: query,
-        history: history,
-        user_role: userRole,
-        user_id: userId || undefined, // 允许为空
-        conversation_id: conversationId || undefined // 允许为空
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {

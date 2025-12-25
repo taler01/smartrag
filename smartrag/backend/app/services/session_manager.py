@@ -256,7 +256,7 @@ class UserSessionManager:
             message = ChatMessage(
                 role=role,
                 content=content,
-                timestamp=datetime.now(),
+                timestamp=datetime.now() if role == "user" else datetime.now() + timedelta(seconds=1),
                 tokens=tokens,
                 importance=self._calculate_importance(role, content)
             )

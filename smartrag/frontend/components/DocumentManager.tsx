@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import { Document as DocType, Role, ROLE_LABELS, UserRole } from '../types';
-import { uploadDocument, getDocumentContent, getPDFPageContent, DocumentUploadResponse, DocumentContentResponse } from '../services/apiService';
+import { uploadDocument, getDocumentContent, getPDFPageContent, getPublicDocuments, getPersonalDocuments, DocumentUploadResponse, DocumentContentResponse } from '../services/apiService';
 import { Document as PDFDocument, Page } from 'react-pdf';
 import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
 import 'react-pdf/dist/esm/Page/TextLayer.css';
@@ -43,6 +43,7 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
   const [isUploading, setIsUploading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<KnowledgeBaseType>('public');
+  const [processingDocId, setProcessingDocId] = useState<string | null>(null);
   
   // 文档查看器相关状态
   const [viewingDocument, setViewingDocument] = useState<DocType | null>(null);
@@ -392,6 +393,93 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
     setContentError(null);
   };
 
+  // 处理文档
+  const handleProcessDocument = async (doc: DocType) => {
+    if (doc.is_processed || processingDocId) return;
+    
+    setProcessingDocId(doc.id);
+    try {
+      const response = await fetch(`${process.env.REACT_APP_API_BASE_URL || 'http://10.168.27.191:9090'}/api/documents/${doc.knowledgeBaseType}/${doc.id}/process`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        if (result.success) {
+          // 开始轮询文档处理状态
+          pollDocumentStatus(doc);
+        } else {
+          setErrorMsg(result.message || '文档处理失败');
+          setProcessingDocId(null);
+        }
+      } else {
+        const errorData = await response.json();
+        setErrorMsg(errorData.detail || errorData.message || '文档处理失败');
+        setProcessingDocId(null);
+      }
+    } catch (error) {
+      console.error('文档处理失败:', error);
+      setErrorMsg('文档处理功能暂未实现，请稍后再试');
+      setProcessingDocId(null);
+    }
+  };
+
+  // 轮询文档处理状态
+  const pollDocumentStatus = async (doc: DocType) => {
+    const maxAttempts = 10;
+    const pollInterval = 30000; // 30秒
+    
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+      
+      try {
+        console.log(`=== 第${attempt + 1}次查询文档状态 ===`, { docId: doc.id, docName: doc.name });
+        
+        // 直接从后端获取最新文档状态
+        let updatedDoc;
+        if (doc.knowledgeBaseType === 'public') {
+          const docs = await getPublicDocuments(token);
+          console.log('公共文档列表:', docs);
+          updatedDoc = docs.find(d => d.id === parseInt(doc.id));
+        } else {
+          const docs = await getPersonalDocuments(token);
+          console.log('个人文档列表:', docs);
+          updatedDoc = docs.find(d => d.id === parseInt(doc.id));
+        }
+        
+        console.log('找到的文档:', updatedDoc);
+        
+        // 检查文档状态
+        if (updatedDoc && updatedDoc.is_processed) {
+          console.log('文档处理完成，更新状态');
+          setProcessingDocId(null);
+          onRefreshDocuments(doc.knowledgeBaseType as 'public' | 'personal');
+          return;
+        } else {
+          console.log('文档未处理完成，继续轮询', { 
+            hasDoc: !!updatedDoc, 
+            isProcessed: updatedDoc?.is_processed 
+          });
+        }
+      } catch (error) {
+        console.error(`第${attempt + 1}次查询文档状态失败:`, error);
+        if (attempt === maxAttempts - 1) {
+          setProcessingDocId(null);
+          setErrorMsg('文档处理超时，请稍后查看');
+          setTimeout(() => setErrorMsg(null), 5000);
+        }
+      }
+    }
+    
+    setProcessingDocId(null);
+    setErrorMsg('文档处理超时，请稍后查看');
+    setTimeout(() => setErrorMsg(null), 5000);
+  };
+
   const rolesList = Object.values(UserRole);
   
   // 检查是否是管理员（检查是否包含"ADMIN"角色代码）
@@ -434,6 +522,29 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
             </svg>
           </button>
+          <button
+            onClick={() => handleProcessDocument(doc)}
+            disabled={doc.is_processed || processingDocId === doc.id}
+            className={`transition-colors p-1 ${
+              doc.is_processed 
+                ? 'text-slate-300 cursor-not-allowed' 
+                : processingDocId === doc.id
+                  ? 'text-blue-500 animate-pulse'
+                  : 'text-slate-300 hover:text-blue-500'
+            }`}
+            title={doc.is_processed ? '已处理' : '处理文档'}
+          >
+            {processingDocId === doc.id ? (
+              <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+            ) : (
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+              </svg>
+            )}
+          </button>
           {isAdmin && (
             <button
               onClick={() => onRemoveDocument(doc.id)}
@@ -453,6 +564,18 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
          <span>{formatBytes(doc.size)}</span>
          <span>•</span>
          <span>{doc.uploadDate.toLocaleDateString()}</span>
+         <span>•</span>
+         <span className={`px-2 py-0.5 text-xs rounded-full ${
+           processingDocId === doc.id
+             ? 'bg-yellow-100 text-yellow-700'
+             : doc.is_processed 
+               ? 'bg-green-100 text-green-700' 
+               : 'bg-red-100 text-red-700'
+         }`}>
+           {processingDocId === doc.id
+             ? '处理中' 
+             : doc.is_processed ? '已处理' : '未处理'}
+         </span>
       </div>
       
       <div className="mt-3">

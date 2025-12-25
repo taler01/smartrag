@@ -23,13 +23,16 @@ class ConversationService:
     ) -> Conversation:
         """创建新会话"""
         try:
+            from datetime import datetime
             conversation = Conversation(
                 id=conversation_id,
                 user_id=user_id,
                 title=title,
                 message_count=0,
                 total_tokens=0,
-                is_active=True
+                is_active=True,
+                created_at=datetime.now(),
+                updated_at=datetime.now()
             )
             self.db.add(conversation)
             self.db.commit()
@@ -101,7 +104,7 @@ class ConversationService:
             
             conversation.summary = summary
             conversation.updated_at = datetime.now()
-            self.db.commit()
+            self.db.flush()
             logger.info(f"更新会话摘要: id={conversation_id}")
             return True
         except Exception as e:
@@ -129,8 +132,7 @@ class ConversationService:
             
             conversation.title = title
             conversation.updated_at = datetime.now()
-            self.db.commit()
-            self.db.refresh(conversation)
+            self.db.flush()
             logger.info(f"更新会话标题: id={conversation_id}, title={title}")
             return conversation
         except Exception as e:
@@ -160,7 +162,7 @@ class ConversationService:
             conversation.message_count = message_count
             conversation.total_tokens = total_tokens
             conversation.updated_at = datetime.now()
-            self.db.commit()
+            self.db.flush()
             return True
         except Exception as e:
             logger.error(f"更新会话统计信息失败: {e}")
@@ -178,17 +180,18 @@ class ConversationService:
     ) -> Optional[ConversationMessage]:
         """保存会话消息"""
         try:
+            from datetime import datetime, timedelta
             message = ConversationMessage(
                 conversation_id=conversation_id,
                 message_id=message_id,
                 role=role,
                 content=content,
                 tokens=tokens,
-                importance=importance
+                importance=importance,
+                created_at=datetime.now() if role == MessageRole.user else datetime.now() + timedelta(seconds=1)
             )
             self.db.add(message)
-            self.db.commit()
-            self.db.refresh(message)
+            self.db.flush()
             logger.debug(f"保存消息: conversation_id={conversation_id}, role={role}")
             return message
         except Exception as e:
@@ -250,7 +253,7 @@ class ConversationService:
             
             conversation.is_active = is_active
             conversation.updated_at = datetime.now()
-            self.db.commit()
+            self.db.flush()
             logger.info(f"设置会话活跃状态: id={conversation_id}, is_active={is_active}")
             return True
         except Exception as e:

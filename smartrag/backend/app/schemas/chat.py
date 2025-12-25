@@ -23,6 +23,8 @@ class SimpleMessageRequest(BaseModel):
     user_role: Optional[str] = "admin"
     user_id: Optional[int] = None
     conversation_id: Optional[str] = None
+    knowledge_retrieval: Optional[bool] = False
+    knowledge_name: Optional[str] = None
 
 
 class ChatResponse(BaseModel):

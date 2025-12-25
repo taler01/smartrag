@@ -49,11 +49,14 @@ export const useStreamingChat = ({ onMessageComplete, onError }: UseStreamingCha
           setIsStreaming(false);
           
           // 创建完整的消息对象，使用fullMessage而不是currentMessage
+          // 延迟1秒以确保助手消息的时间戳比用户消息晚
+          const assistantTimestamp = new Date(Date.now() + 1000);
+          
           const completeMessage: ChatMessage = {
             id: Date.now().toString(),
             role: 'model',
             text: fullMessage,
-            timestamp: new Date()
+            timestamp: assistantTimestamp
           };
           
           onMessageComplete?.(completeMessage);

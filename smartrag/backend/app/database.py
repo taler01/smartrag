@@ -35,7 +35,14 @@ def get_db():
     try:
         yield db
     except Exception as e:
-        logger.error(f"数据库会话错误: {e}")
+        # 不要捕获和重新抛出HTTPException，让FastAPI处理它们
+        from fastapi import HTTPException
+        if isinstance(e, HTTPException):
+            # 直接关闭数据库连接并重新抛出异常
+            db.close()
+            raise
+        logger.error(f"数据库会话错误: {type(e).__name__}: {str(e)}")
+        logger.exception(e)
         db.rollback()
         raise
     finally:
