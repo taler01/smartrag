@@ -910,15 +910,64 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-blue-50 to-slate-100 p-4">
+    <>
+      <style>{`
+        @keyframes metalShine {
+          0% { background-position: 200% center; }
+          100% { background-position: -200% center; }
+        }
+        
+        @keyframes logoMetal {
+          0% { background-position: 200% center; }
+          100% { background-position: -200% center; }
+        }
+        
+        .metal-text {
+          background: linear-gradient(
+            90deg,
+            #ff0000 0%,
+            #ff7f00 15%,
+            #ffff00 30%,
+            #00ff00 45%,
+            #00ffff 60%,
+            #0000ff 75%,
+            #8b00ff 90%,
+            #ff0000 100%
+          );
+          background-size: 200% auto;
+          -webkit-background-clip: text;
+          background-clip: text;
+          -webkit-text-fill-color: transparent;
+          animation: metalShine 50s linear infinite;
+        }
+        
+        .metal-logo {
+          background: linear-gradient(
+            90deg,
+            #ff0000 0%,
+            #ff7f00 15%,
+            #ffff00 30%,
+            #00ff00 45%,
+            #00ffff 60%,
+            #0000ff 75%,
+            #8b00ff 90%,
+            #ff0000 100%
+          );
+          background-size: 200% auto;
+          -webkit-background-clip: text;
+          background-clip: text;
+          -webkit-text-fill-color: transparent;
+          animation: logoMetal 50s linear infinite;
+        }
+      `}</style>
+      <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-blue-50 to-slate-100 p-4">
       <div className="mb-8 text-center">
         <div className="mb-4">
-          <svg className="w-16 h-16 mx-auto text-blue-600" fill="currentColor" viewBox="0 0 24 24">
+          <svg className="w-16 h-16 mx-auto metal-logo" fill="currentColor" viewBox="0 0 24 24">
             <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
           </svg>
         </div>
-        <h1 className="text-4xl font-bold text-slate-800 tracking-tight">SmartRAG</h1>
-        <p className="text-slate-500 mt-2">智能知识库检索系统</p>
+        <h1 className="text-4xl font-bold tracking-tight metal-text">SmartRAG - 智能知识库检索系统</h1>
       </div>
 
       <div className="max-w-lg w-full bg-white rounded-2xl shadow-xl overflow-hidden">
@@ -938,6 +987,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
         </div>
       </div>
     </div>
+    </>
   );
 };
 

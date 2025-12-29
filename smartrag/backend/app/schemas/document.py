@@ -138,3 +138,19 @@ class DocumentDetailResponse(BaseModel):
     
     class Config:
         from_attributes = True
+
+
+class FolderUploadResult(BaseModel):
+    """文件夹上传单个文件结果"""
+    filename: str
+    success: bool
+    message: str
+    document_id: Optional[int] = None
+    document_type: Optional[str] = None
+
+
+class FolderUploadResponse(BaseModel):
+    """文件夹上传响应模型"""
+    success: bool
+    message: str
+    results: List[FolderUploadResult]

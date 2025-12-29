@@ -40,10 +40,12 @@ const formatBytes = (bytes: number): string => {
 
 const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocument, onRemoveDocument, onRefreshDocuments, userRole, availableRoles = [], token }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [showErrorModal, setShowErrorModal] = useState(false);
+  const [errorModalMessage, setErrorModalMessage] = useState('');
   const [activeTab, setActiveTab] = useState<KnowledgeBaseType>('public');
-  const [processingDocId, setProcessingDocId] = useState<string | null>(null);
+  const [processingDocIds, setProcessingDocIds] = useState<Set<string>>(new Set());
   
   // 文档查看器相关状态
   const [viewingDocument, setViewingDocument] = useState<DocType | null>(null);
@@ -67,6 +69,10 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
   const [publicPermissions, setPublicPermissions] = useState<string[]>([]);
   // 个人知识库权限选择（仅自己可见）
   const [personalPermissions, setPersonalPermissions] = useState<string[]>(userRole);
+  
+  // 文件夹上传相关状态
+  const [uploadProgress, setUploadProgress] = useState<{ [filename: string]: { success: boolean; message: string } }>({});
+  const [showUploadProgress, setShowUploadProgress] = useState(false);
 
   useEffect(() => {
     // 设置公共知识库默认权限 - 用户只能选择自己的部门
@@ -85,6 +91,125 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
     );
   };
 
+  const showError = (message: string) => {
+    setErrorModalMessage(message);
+    setShowErrorModal(true);
+    setTimeout(() => setShowErrorModal(false), 5000);
+  };
+
+  const handleFolderChange = async (e: React.ChangeEvent<HTMLInputElement>, type: KnowledgeBaseType) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const currentPermissions = type === 'public' ? publicPermissions : personalPermissions;
+    
+    if (type === 'public' && currentPermissions.length === 0) {
+      setActiveTab('personal');
+      showError("已自动切换到个人知识库上传");
+      return;
+    }
+    
+    if (type === 'public' && !currentPermissions.some(permission => userRole.includes(permission))) {
+      setActiveTab('personal');
+      showError("已自动切换到个人知识库上传");
+      return;
+    }
+
+    setIsUploading(true);
+    setShowUploadProgress(true);
+    setUploadProgress({});
+
+    try {
+      const fileArray = Array.from(files) as File[];
+      const allowedExtensions = ['.txt', '.md', '.json', '.pdf', '.docx', '.doc', '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.svg'];
+      
+      const validFiles = fileArray.filter((file: File) => {
+        if (!file.type && file.name.endsWith('/') || file.size === 0) {
+          return false;
+        }
+        const fileExtension = '.' + file.name.split('.').pop()?.toLowerCase();
+        return allowedExtensions.includes(fileExtension);
+      });
+
+      if (validFiles.length === 0) {
+        showError("没有找到支持的文件类型");
+        return;
+      }
+
+      const formData = new FormData();
+      validFiles.forEach((file: File) => {
+        const pureFilename = file.name.split('/').pop() || file.name.split('\\').pop() || file.name;
+        formData.append('files', file, pureFilename);
+      });
+      formData.append('type', type);
+      
+      if (type === 'public') {
+        const permissionIds = currentPermissions.map(role => {
+          const roleCodeToId: Record<string, number> = {
+            "ADMIN": 1,
+            "R_AND_D": 2,
+            "AFTER_SALES": 3,
+            "PRE_SALES": 4,
+            "QA": 5,
+            "OPS": 6
+          };
+          return roleCodeToId[role] || 2;
+        });
+        formData.append('permissions', JSON.stringify(permissionIds));
+      }
+
+      const response = await fetch(`${process.env.REACT_APP_API_BASE_URL || 'http://10.168.27.191:9090'}/api/documents/upload-folder`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+        body: formData,
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        if (result.success) {
+          setUploadProgress(result.results.reduce((acc: { [key: string]: { success: boolean; message: string } }, item: { filename: string; success: boolean; message: string }) => {
+            acc[item.filename] = { success: item.success, message: item.message };
+            return acc;
+          }, {}));
+          onRefreshDocuments(type);
+          
+          // 自动处理成功上传的文档
+          const successfulUploads = result.results.filter((item: { success: boolean; document_id?: number; document_type?: string }) => 
+            item.success && item.document_id
+          );
+          
+          for (const upload of successfulUploads) {
+            const doc: DocType = {
+              id: upload.document_id.toString(),
+              name: upload.filename,
+              content: '',
+              uploadDate: new Date(),
+              size: 0,
+              permissions: [],
+              knowledgeBaseType: upload.document_type as 'public' | 'personal',
+              is_processed: false // 明确设置为未处理状态
+            };
+            await handleProcessDocument(doc);
+          }
+        } else {
+          showError(result.message || "文件夹上传失败");
+        }
+      } else {
+        const errorData = await response.json();
+        showError(errorData.detail || errorData.message || "文件夹上传失败");
+      }
+    } catch (error) {
+      console.error("文件夹上传失败:", error);
+      showError(error instanceof Error ? error.message : "文件夹上传失败");
+    } finally {
+      setIsUploading(false);
+      if (folderInputRef.current) folderInputRef.current.value = '';
+      setTimeout(() => setShowUploadProgress(false), 3000);
+    }
+  };
+
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>, type: KnowledgeBaseType) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -94,21 +219,18 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
     if (type === 'public' && currentPermissions.length === 0) {
       // 如果用户没有勾选任何部门角色，自动切换到个人知识库
       setActiveTab('personal');
-      setErrorMsg("已自动切换到个人知识库上传");
-      setTimeout(() => setErrorMsg(null), 2000);
+      showError("已自动切换到个人知识库上传");
       return;
     }
     
     // 对于公共知识库，如果用户没有勾选本部门，自动切换到个人知识库
     if (type === 'public' && !currentPermissions.some(permission => userRole.includes(permission))) {
       setActiveTab('personal');
-      setErrorMsg("已自动切换到个人知识库上传");
-      setTimeout(() => setErrorMsg(null), 2000);
+      showError("已自动切换到个人知识库上传");
       return;
     }
 
     setIsUploading(true);
-    setErrorMsg(null);
 
     try {
       // 逐个处理文件
@@ -125,7 +247,7 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
         const allowedExtensions = ['.txt', '.md', '.json', '.pdf', '.docx', '.doc', '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.svg'];
         const fileExtension = '.' + file.name.split('.').pop()?.toLowerCase();
         if (!allowedExtensions.includes(fileExtension)) {
-          setErrorMsg(`不支持的文件类型: ${fileExtension}。支持的类型: ${allowedExtensions.join(', ')}`);
+          showError(`不支持的文件类型: ${fileExtension}。支持的类型: ${allowedExtensions.join(', ')}`);
           continue;
         }
         
@@ -171,7 +293,8 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
             uploadDate: new Date(),
             size: response.file_size || 0, // 使用从API返回的实际文件大小
             permissions: response.permissions?.roles || [],
-            knowledgeBaseType: type
+            knowledgeBaseType: type,
+            is_processed: false // 明确设置为未处理状态
           };
           
           console.log('5. 创建的文档对象:', newDoc);
@@ -181,13 +304,16 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
           
           // 添加到文档列表
           onAddDocument(newDoc);
+          
+          // 自动调用处理接口
+          await handleProcessDocument(newDoc);
         } else {
-          setErrorMsg(response.message || "文件上传失败");
+          showError(response.message || "文件上传失败");
         }
       }
     } catch (error) {
       console.error("文件上传失败:", error);
-      setErrorMsg(error instanceof Error ? error.message : "文件上传失败");
+      showError(error instanceof Error ? error.message : "文件上传失败");
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -395,9 +521,9 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
 
   // 处理文档
   const handleProcessDocument = async (doc: DocType) => {
-    if (doc.is_processed || processingDocId) return;
+    if (doc.is_processed || processingDocIds.has(doc.id)) return;
     
-    setProcessingDocId(doc.id);
+    setProcessingDocIds(prev => new Set(prev).add(doc.id));
     try {
       const response = await fetch(`${process.env.REACT_APP_API_BASE_URL || 'http://10.168.27.191:9090'}/api/documents/${doc.knowledgeBaseType}/${doc.id}/process`, {
         method: 'POST',
@@ -413,18 +539,30 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
           // 开始轮询文档处理状态
           pollDocumentStatus(doc);
         } else {
-          setErrorMsg(result.message || '文档处理失败');
-          setProcessingDocId(null);
+          showError(result.message || '文档处理失败');
+          setProcessingDocIds(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(doc.id);
+            return newSet;
+          });
         }
       } else {
         const errorData = await response.json();
-        setErrorMsg(errorData.detail || errorData.message || '文档处理失败');
-        setProcessingDocId(null);
+        showError(errorData.detail || errorData.message || '文档处理失败');
+        setProcessingDocIds(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(doc.id);
+          return newSet;
+        });
       }
     } catch (error) {
       console.error('文档处理失败:', error);
-      setErrorMsg('文档处理功能暂未实现，请稍后再试');
-      setProcessingDocId(null);
+      showError('文档处理功能暂未实现，请稍后再试');
+      setProcessingDocIds(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(doc.id);
+        return newSet;
+      });
     }
   };
 
@@ -456,7 +594,11 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
         // 检查文档状态
         if (updatedDoc && updatedDoc.is_processed) {
           console.log('文档处理完成，更新状态');
-          setProcessingDocId(null);
+          setProcessingDocIds(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(doc.id);
+            return newSet;
+          });
           onRefreshDocuments(doc.knowledgeBaseType as 'public' | 'personal');
           return;
         } else {
@@ -468,16 +610,22 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
       } catch (error) {
         console.error(`第${attempt + 1}次查询文档状态失败:`, error);
         if (attempt === maxAttempts - 1) {
-          setProcessingDocId(null);
-          setErrorMsg('文档处理超时，请稍后查看');
-          setTimeout(() => setErrorMsg(null), 5000);
+          setProcessingDocIds(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(doc.id);
+            return newSet;
+          });
+          showError('文档处理超时，请稍后查看');
         }
       }
     }
     
-    setProcessingDocId(null);
-    setErrorMsg('文档处理超时，请稍后查看');
-    setTimeout(() => setErrorMsg(null), 5000);
+    setProcessingDocIds(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(doc.id);
+      return newSet;
+    });
+    showError('文档处理超时，请稍后查看');
   };
 
   const rolesList = Object.values(UserRole);
@@ -524,17 +672,17 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
           </button>
           <button
             onClick={() => handleProcessDocument(doc)}
-            disabled={doc.is_processed || processingDocId === doc.id}
+            disabled={doc.is_processed || processingDocIds.has(doc.id)}
             className={`transition-colors p-1 ${
               doc.is_processed 
                 ? 'text-slate-300 cursor-not-allowed' 
-                : processingDocId === doc.id
+                : processingDocIds.has(doc.id)
                   ? 'text-blue-500 animate-pulse'
                   : 'text-slate-300 hover:text-blue-500'
             }`}
             title={doc.is_processed ? '已处理' : '处理文档'}
           >
-            {processingDocId === doc.id ? (
+            {processingDocIds.has(doc.id) ? (
               <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
@@ -566,13 +714,13 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
          <span>{doc.uploadDate.toLocaleDateString()}</span>
          <span>•</span>
          <span className={`px-2 py-0.5 text-xs rounded-full ${
-           processingDocId === doc.id
+           processingDocIds.has(doc.id)
              ? 'bg-yellow-100 text-yellow-700'
              : doc.is_processed 
                ? 'bg-green-100 text-green-700' 
                : 'bg-red-100 text-red-700'
          }`}>
-           {processingDocId === doc.id
+           {processingDocIds.has(doc.id)
              ? '处理中' 
              : doc.is_processed ? '已处理' : '未处理'}
          </span>
@@ -634,7 +782,7 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
             </p>
           </div>
           
-          <div className="relative">
+          <div className="flex gap-2">
             <input
               type="file"
               multiple
@@ -646,17 +794,13 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
             <button
               onClick={() => {
                 if (isPublic && currentPermissions.length === 0) {
-                  // 如果用户没有勾选任何部门角色，自动切换到个人知识库
                   setActiveTab('personal');
-                  setErrorMsg("已自动切换到个人知识库上传");
-                  setTimeout(() => setErrorMsg(null), 2000);
+                  showError("已自动切换到个人知识库上传");
                   return;
                 }
                 if (isPublic && !currentPermissions.some(perm => userRoleCodes.includes(perm))) {
-                  // 如果用户在公共知识库没有勾选本部门，自动切换到个人知识库
                   setActiveTab('personal');
-                  setErrorMsg("已自动切换到个人知识库上传");
-                  setTimeout(() => setErrorMsg(null), 2000);
+                  showError("已自动切换到个人知识库上传");
                   return;
                 }
                 fileInputRef.current?.click();
@@ -670,8 +814,116 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
             >
               {isUploading ? '上传中...' : '上传文档'}
             </button>
+            
+            <input
+              type="file"
+              ref={folderInputRef}
+              onChange={(e) => handleFolderChange(e, type)}
+              webkitdirectory="true"
+              directory="true"
+              className="hidden"
+            />
+            <button
+              onClick={() => {
+                if (isPublic && currentPermissions.length === 0) {
+                  setActiveTab('personal');
+                  showError("已自动切换到个人知识库上传");
+                  return;
+                }
+                if (isPublic && !currentPermissions.some(perm => userRoleCodes.includes(perm))) {
+                  setActiveTab('personal');
+                  showError("已自动切换到个人知识库上传");
+                  return;
+                }
+                folderInputRef.current?.click();
+              }}
+              disabled={isUploading}
+              className="flex items-center gap-2 text-white px-5 py-2.5 rounded-lg transition-colors font-medium shadow-lg bg-purple-600 hover:bg-purple-700 shadow-purple-200"
+            >
+              上传文件夹
+            </button>
           </div>
         </div>
+
+        {/* Upload Progress Modal */}
+        {showUploadProgress && Object.keys(uploadProgress).length > 0 && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full mx-4 max-h-[80vh] flex flex-col">
+              <div className="p-4 border-b border-slate-200 flex items-center justify-between">
+                <h4 className="text-lg font-bold text-slate-800">上传进度</h4>
+                <button 
+                  onClick={() => setShowUploadProgress(false)}
+                  className="p-1 hover:bg-slate-100 rounded-lg transition-colors"
+                  title="关闭"
+                >
+                  <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              <div className="p-4 overflow-y-auto flex-1">
+                <div className="space-y-2">
+                  {Object.entries(uploadProgress).map(([filename, result]: [string, { success: boolean; message: string }]) => (
+                    <div key={filename} className="flex items-center justify-between text-sm p-3 rounded-lg bg-slate-50 hover:bg-slate-100 transition-colors">
+                      <span className="truncate flex-1 mr-3 text-slate-700" title={filename}>{filename}</span>
+                      <span className={`flex items-center gap-1.5 font-medium ${result.success ? 'text-green-600' : 'text-red-600'}`}>
+                        {result.success ? (
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          </svg>
+                        ) : (
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        )}
+                        {result.success ? '成功' : result.message}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="p-4 border-t border-slate-200 flex justify-end gap-2">
+                <button 
+                  onClick={() => setShowUploadProgress(false)}
+                  className="px-4 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700 transition-colors font-medium"
+                >
+                  关闭
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Error Modal */}
+        {showErrorModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-xl shadow-2xl max-w-md w-full mx-4">
+              <div className="p-4 border-b border-slate-200 flex items-center justify-between">
+                <h4 className="text-lg font-bold text-slate-800">提示</h4>
+                <button 
+                  onClick={() => setShowErrorModal(false)}
+                  className="p-1 hover:bg-slate-100 rounded-lg transition-colors"
+                  title="关闭"
+                >
+                  <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              <div className="p-6">
+                <p className="text-slate-700">{errorModalMessage}</p>
+              </div>
+              <div className="p-4 border-t border-slate-200 flex justify-end">
+                <button 
+                  onClick={() => setShowErrorModal(false)}
+                  className="px-4 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700 transition-colors font-medium"
+                >
+                  确定
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Permission Selector - Only show for public knowledge base */}
         {isPublic && (
@@ -1149,15 +1401,6 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
       </div>
 
       <div className="flex-1 overflow-auto p-6">
-        {errorMsg && (
-          <div className="mb-4 bg-red-50 text-red-700 px-4 py-2 rounded text-sm border border-red-100 flex items-center">
-            <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            {errorMsg}
-          </div>
-        )}
-
         {/* Upload Section */}
         {renderUploadSection(activeTab)}
 

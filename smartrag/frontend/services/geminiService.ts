@@ -10,7 +10,7 @@ export const generateRAGResponse = async (
   conversationId: string = '',
   knowledgeRetrieval: boolean = false,
   knowledgeName: string = ''
-): Promise<string> => {
+): Promise<{ response: string; urlMapping?: Record<string, string> }> => {
   console.log('generateRAGResponse called with:', { query, documents, history, userRole, userId, conversationId, knowledgeRetrieval, knowledgeName });
   
   const requestBody: any = {
@@ -44,7 +44,20 @@ export const generateRAGResponse = async (
     }
 
     const data = await response.json();
-    return data.response || '抱歉，无法获取回复。';
+    
+    // 处理URL映射表
+    let processedResponse = data.response || '抱歉，无法获取回复。';
+    const urlMapping = data.url_mapping || {};
+    
+    // 替换占位符为原始URL
+    Object.entries(urlMapping).forEach(([placeholder, url]) => {
+      processedResponse = processedResponse.replace(
+        new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'),
+        url
+      );
+    });
+    
+    return { response: processedResponse, urlMapping };
   } catch (error) {
     console.error('Error calling backend API:', error);
     // 如果API调用失败，使用下面的模拟响应
@@ -75,5 +88,5 @@ export const generateRAGResponse = async (
     rolePrefix = roleResponses[userRole] || '';
   }
   
-  return `${rolePrefix}这是对查询"${query}"的响应。${contextMessage ? `我已参考了历史对话记录。` : ''}实际项目需要集成真实的Gemini API。`;
+  return { response: `${rolePrefix}这是对查询"${query}"的响应。${contextMessage ? `我已参考了历史对话记录。` : ''}实际项目需要集成真实的Gemini API。` };
 };

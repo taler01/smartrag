@@ -11,6 +11,7 @@ export const useStreamingChat = ({ onMessageComplete, onError }: UseStreamingCha
   const [isStreaming, setIsStreaming] = useState(false);
   const [currentMessage, setCurrentMessage] = useState<string>('');
   const [error, setError] = useState<Error | null>(null);
+  const [urlMapping, setUrlMapping] = useState<Record<string, string>>({});
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const startStreaming = useCallback(async (
@@ -27,6 +28,7 @@ export const useStreamingChat = ({ onMessageComplete, onError }: UseStreamingCha
     
     setIsStreaming(true);
     setCurrentMessage('');
+    setUrlMapping({});
     setError(null);
 
     // 用于存储完整的消息内容
@@ -48,18 +50,30 @@ export const useStreamingChat = ({ onMessageComplete, onError }: UseStreamingCha
         () => {
           setIsStreaming(false);
           
-          // 创建完整的消息对象，使用fullMessage而不是currentMessage
+          // 使用URL映射表替换占位符
+          let processedMessage = fullMessage;
+          Object.entries(urlMapping).forEach(([placeholder, url]: [string, string]) => {
+            processedMessage = processedMessage.replace(
+              new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'),
+              url
+            );
+          });
+          
+          // 创建完整的消息对象，使用processedMessage
           // 延迟1秒以确保助手消息的时间戳比用户消息晚
           const assistantTimestamp = new Date(Date.now() + 1000);
           
           const completeMessage: ChatMessage = {
             id: Date.now().toString(),
             role: 'model',
-            text: fullMessage,
+            text: processedMessage,
             timestamp: assistantTimestamp
           };
           
           onMessageComplete?.(completeMessage);
+        },
+        (mapping: Record<string, string>) => {
+          setUrlMapping(mapping);
         }
       );
     } catch (err) {
@@ -79,6 +93,7 @@ export const useStreamingChat = ({ onMessageComplete, onError }: UseStreamingCha
 
   const resetMessage = useCallback(() => {
     setCurrentMessage('');
+    setUrlMapping({});
     setError(null);
   }, []);
 
@@ -86,6 +101,7 @@ export const useStreamingChat = ({ onMessageComplete, onError }: UseStreamingCha
     isStreaming,
     currentMessage,
     error,
+    urlMapping,
     startStreaming,
     stopStreaming,
     resetMessage

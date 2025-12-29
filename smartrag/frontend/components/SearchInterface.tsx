@@ -298,7 +298,7 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({
         // 因为它会在 useStreamingChat 的 onMessageComplete 或 onError 回调中处理
       } else {
         // 传统方式：调用后端API获取完整回复
-        const responseText = await generateRAGResponse(
+        const { response: responseText } = await generateRAGResponse(
           userMsg.text, 
           documents, 
           history, 
@@ -349,7 +349,7 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({
           }));
           
           // 传统方式：调用后端API获取完整回复
-          const responseText = await generateRAGResponse(
+          const { response: responseText } = await generateRAGResponse(
             userMsg.text, 
             documents, 
             history, 
@@ -618,51 +618,138 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({
                     <span className="text-xs font-bold text-slate-500">SmartRAG 助手</span>
                   </div>
                 )}
-                <div className="prose prose-sm max-w-none break-words leading-relaxed">
+                <div className="prose prose-sm max-w-full break-words leading-relaxed overflow-hidden">
                   {msg.role === 'model' ? (
                     <ReactMarkdown
                       remarkPlugins={[remarkGfm]}
                       rehypePlugins={[rehypeHighlight]}
                       components={{
+                        h1: ({ children }) => (
+                          <h1 className="text-2xl font-bold text-slate-800 mt-6 mb-4 pb-2 border-b-2 border-slate-200 break-words">
+                            {children}
+                          </h1>
+                        ),
+                        h2: ({ children }) => (
+                          <h2 className="text-xl font-bold text-slate-800 mt-5 mb-3 pb-1 border-b border-slate-200 break-words">
+                            {children}
+                          </h2>
+                        ),
+                        h3: ({ children }) => (
+                          <h3 className="text-lg font-semibold text-slate-800 mt-4 mb-2 break-words">
+                            {children}
+                          </h3>
+                        ),
+                        h4: ({ children }) => (
+                          <h4 className="text-base font-semibold text-slate-800 mt-3 mb-2 break-words">
+                            {children}
+                          </h4>
+                        ),
+                        h5: ({ children }) => (
+                          <h5 className="text-sm font-semibold text-slate-800 mt-2 mb-1 break-words">
+                            {children}
+                          </h5>
+                        ),
+                        h6: ({ children }) => (
+                          <h6 className="text-xs font-semibold text-slate-600 mt-2 mb-1 break-words">
+                            {children}
+                          </h6>
+                        ),
+                        p: ({ children }) => (
+                          <p className="my-3 text-slate-700 leading-7 break-words">
+                            {children}
+                          </p>
+                        ),
+                        ul: ({ children }) => (
+                          <ul className="my-3 ml-6 list-disc space-y-1 marker:text-slate-400 break-words">
+                            {children}
+                          </ul>
+                        ),
+                        ol: ({ children }) => (
+                          <ol className="my-3 ml-6 list-decimal space-y-1 marker:text-slate-400 break-words">
+                            {children}
+                          </ol>
+                        ),
+                        li: ({ children }) => (
+                          <li className="text-slate-700 leading-6 pl-1 break-words">
+                            {children}
+                          </li>
+                        ),
+                        blockquote: ({ children }) => (
+                          <blockquote className="my-4 pl-4 border-l-4 border-blue-400 bg-blue-50 py-2 pr-3 italic text-slate-600 break-words">
+                            {children}
+                          </blockquote>
+                        ),
+                        a: ({ href, children }) => (
+                          <a 
+                            href={href} 
+                            className="text-blue-600 hover:text-blue-800 underline decoration-1 hover:decoration-2 transition-all break-all"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            {children}
+                          </a>
+                        ),
+                        strong: ({ children }) => (
+                          <strong className="font-bold text-slate-900 break-words">
+                            {children}
+                          </strong>
+                        ),
+                        em: ({ children }) => (
+                          <em className="italic text-slate-700 break-words">
+                            {children}
+                          </em>
+                        ),
+                        hr: () => (
+                          <hr className="my-6 border-t-2 border-slate-200" />
+                        ),
                         code: ({ node, className, children, ...props }: any) => {
                           const match = /language-(\w+)/.exec(className || '');
                           const isInline = !props['data-inline'] && !match;
                           return !isInline && match ? (
-                            <pre className="bg-slate-100 rounded-md p-3 overflow-x-auto">
+                            <pre className="bg-slate-800 text-slate-100 rounded-lg p-4 overflow-x-auto my-4 shadow-sm max-w-full">
                               <code className={className} {...props}>
                                 {children}
                               </code>
                             </pre>
                           ) : (
-                            <code className="bg-slate-100 px-1 py-0.5 rounded text-sm" {...props}>
+                            <code className="bg-slate-100 text-slate-800 px-1.5 py-0.5 rounded text-sm font-mono border border-slate-200 break-all" {...props}>
                               {children}
                             </code>
                           );
                         },
                         table: ({ children }) => (
-                          <div className="overflow-x-auto">
-                            <table className="min-w-full border-collapse border border-slate-300">
+                          <div className="overflow-x-auto my-4 rounded-lg border border-slate-200 shadow-sm max-w-full">
+                            <table className="min-w-full border-collapse break-words">
                               {children}
                             </table>
                           </div>
                         ),
+                        thead: ({ children }) => (
+                          <thead className="bg-slate-50">
+                            {children}
+                          </thead>
+                        ),
                         th: ({ children }) => (
-                          <th className="border border-slate-300 px-3 py-2 bg-slate-50 text-left font-semibold">
+                          <th className="border border-slate-200 px-4 py-2 text-left font-semibold text-slate-700 text-sm break-words">
                             {children}
                           </th>
                         ),
                         td: ({ children }) => (
-                          <td className="border border-slate-300 px-3 py-2">
+                          <td className="border border-slate-200 px-4 py-2 text-slate-700 text-sm break-words">
                             {children}
                           </td>
+                        ),
+                        tbody: ({ children }) => (
+                          <tbody className="bg-white divide-y divide-slate-100">
+                            {children}
+                          </tbody>
                         ),
                         img: ({ src, alt, ...props }: any) => (
                           <img 
                             src={src} 
                             alt={alt} 
-                            className="max-w-full h-auto rounded-lg shadow-sm my-2 cursor-pointer hover:shadow-md transition-shadow"
+                            className="max-w-full h-auto rounded-lg shadow-md my-4 cursor-pointer hover:shadow-lg transition-shadow border border-slate-200"
                             onClick={() => {
-                              // 点击图片时可以放大查看
                               const img = new Image();
                               img.src = src;
                               const w = window.open('');
@@ -678,7 +765,7 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({
                       {msg.text}
                     </ReactMarkdown>
                   ) : (
-                    <div className="whitespace-pre-wrap">{msg.text}</div>
+                    <div className="whitespace-pre-wrap break-words">{msg.text}</div>
                   )}
                 </div>
                 <div className={`text-[10px] mt-2 text-right ${
@@ -719,37 +806,125 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({
                       remarkPlugins={[remarkGfm]}
                       rehypePlugins={[rehypeHighlight]}
                       components={{
+                        h1: ({ children }) => (
+                          <h1 className="text-2xl font-bold text-slate-800 mt-6 mb-4 pb-2 border-b-2 border-slate-200">
+                            {children}
+                          </h1>
+                        ),
+                        h2: ({ children }) => (
+                          <h2 className="text-xl font-bold text-slate-800 mt-5 mb-3 pb-1 border-b border-slate-200">
+                            {children}
+                          </h2>
+                        ),
+                        h3: ({ children }) => (
+                          <h3 className="text-lg font-semibold text-slate-800 mt-4 mb-2">
+                            {children}
+                          </h3>
+                        ),
+                        h4: ({ children }) => (
+                          <h4 className="text-base font-semibold text-slate-800 mt-3 mb-2">
+                            {children}
+                          </h4>
+                        ),
+                        h5: ({ children }) => (
+                          <h5 className="text-sm font-semibold text-slate-800 mt-2 mb-1">
+                            {children}
+                          </h5>
+                        ),
+                        h6: ({ children }) => (
+                          <h6 className="text-xs font-semibold text-slate-600 mt-2 mb-1">
+                            {children}
+                          </h6>
+                        ),
+                        p: ({ children }) => (
+                          <p className="my-3 text-slate-700 leading-7">
+                            {children}
+                          </p>
+                        ),
+                        ul: ({ children }) => (
+                          <ul className="my-3 ml-6 list-disc space-y-1 marker:text-slate-400">
+                            {children}
+                          </ul>
+                        ),
+                        ol: ({ children }) => (
+                          <ol className="my-3 ml-6 list-decimal space-y-1 marker:text-slate-400">
+                            {children}
+                          </ol>
+                        ),
+                        li: ({ children }) => (
+                          <li className="text-slate-700 leading-6 pl-1">
+                            {children}
+                          </li>
+                        ),
+                        blockquote: ({ children }) => (
+                          <blockquote className="my-4 pl-4 border-l-4 border-blue-400 bg-blue-50 py-2 pr-3 italic text-slate-600">
+                            {children}
+                          </blockquote>
+                        ),
+                        a: ({ href, children }) => (
+                          <a 
+                            href={href} 
+                            className="text-blue-600 hover:text-blue-800 underline decoration-1 hover:decoration-2 transition-all"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            {children}
+                          </a>
+                        ),
+                        strong: ({ children }) => (
+                          <strong className="font-bold text-slate-900">
+                            {children}
+                          </strong>
+                        ),
+                        em: ({ children }) => (
+                          <em className="italic text-slate-700">
+                            {children}
+                          </em>
+                        ),
+                        hr: () => (
+                          <hr className="my-6 border-t-2 border-slate-200" />
+                        ),
                         code: ({ node, className, children, ...props }: any) => {
                           const match = /language-(\w+)/.exec(className || '');
                           const isInline = !props['data-inline'] && !match;
                           return !isInline && match ? (
-                            <pre className="bg-slate-100 rounded-md p-3 overflow-x-auto">
+                            <pre className="bg-slate-800 text-slate-100 rounded-lg p-4 overflow-x-auto my-4 shadow-md">
                               <code className={className} {...props}>
                                 {children}
                               </code>
                             </pre>
                           ) : (
-                            <code className="bg-slate-100 px-1 py-0.5 rounded text-sm" {...props}>
+                            <code className="bg-slate-100 text-slate-800 px-1.5 py-0.5 rounded text-sm font-mono border border-slate-200" {...props}>
                               {children}
                             </code>
                           );
                         },
                         table: ({ children }) => (
-                          <div className="overflow-x-auto">
-                            <table className="min-w-full border-collapse border border-slate-300">
+                          <div className="overflow-x-auto my-4 rounded-lg border border-slate-200 shadow-sm">
+                            <table className="min-w-full border-collapse">
                               {children}
                             </table>
                           </div>
                         ),
+                        thead: ({ children }) => (
+                          <thead className="bg-slate-50">
+                            {children}
+                          </thead>
+                        ),
                         th: ({ children }) => (
-                          <th className="border border-slate-300 px-3 py-2 bg-slate-50 text-left font-semibold">
+                          <th className="border border-slate-200 px-4 py-2 text-left font-semibold text-slate-700 text-sm">
                             {children}
                           </th>
                         ),
                         td: ({ children }) => (
-                          <td className="border border-slate-300 px-3 py-2">
+                          <td className="border border-slate-200 px-4 py-2 text-slate-700 text-sm">
                             {children}
                           </td>
+                        ),
+                        tbody: ({ children }) => (
+                          <tbody className="bg-white divide-y divide-slate-100">
+                            {children}
+                          </tbody>
                         ),
                       }}
                     >

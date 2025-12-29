@@ -443,7 +443,57 @@ function App() {
       });
 
   return (
-    <div className="flex h-screen bg-slate-100 overflow-hidden">
+    <>
+      <style>{`
+        @keyframes metalShine {
+           0% { background-position: 200% center; }
+           100% { background-position: -200% center; }
+         }
+         
+         @keyframes logoMetal {
+           0% { background-position: 200% center; }
+           100% { background-position: -200% center; }
+         }
+         
+         .metal-text {
+             background: linear-gradient(
+               90deg,
+               #ff0000 0%,
+               #ff7f00 15%,
+               #ffff00 30%,
+               #00ff00 45%,
+               #00ffff 60%,
+               #0000ff 75%,
+               #8b00ff 90%,
+               #ff0000 100%
+             );
+             background-size: 200% auto;
+             -webkit-background-clip: text;
+             background-clip: text;
+             -webkit-text-fill-color: transparent;
+             animation: metalShine 50s linear infinite;
+           }
+           
+           .metal-logo {
+             background: linear-gradient(
+               90deg,
+               #ff0000 0%,
+               #ff7f00 15%,
+               #ffff00 30%,
+               #00ff00 45%,
+               #00ffff 60%,
+               #0000ff 75%,
+               #8b00ff 90%,
+               #ff0000 100%
+             );
+             background-size: 200% auto;
+             -webkit-background-clip: text;
+             background-clip: text;
+             -webkit-text-fill-color: transparent;
+             animation: logoMetal 50s linear infinite;
+           }
+      `}</style>
+      <div className="flex h-screen bg-slate-100 overflow-hidden">
       {/* Sidebar */}
       <div className="flex h-full">
         {/* Left Sidebar - Navigation */}
@@ -452,12 +502,12 @@ function App() {
           <div className="p-6 border-b border-slate-100">
             <div className="flex items-center gap-2">
               <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
-                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-6 h-6 metal-logo" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.384-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
                 </svg>
               </div>
               <div>
-                <h1 className="text-xl font-bold text-slate-800">SmartRAG</h1>
+                <h1 className="text-xl font-bold metal-text">SmartRAG</h1>
                 <p className="text-xs text-slate-500">员工知识门户</p>
               </div>
             </div>
@@ -595,6 +645,7 @@ function App() {
           )}
         </main>
     </div>
+    </>
   );
 }
 

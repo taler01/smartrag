@@ -729,6 +729,7 @@ export const streamChatMessage = async (
   onChunk: (chunk: string) => void,
   onError: (error: Error) => void,
   onComplete: () => void,
+  onUrlMapping?: (urlMapping: Record<string, string>) => void,
   options: {
     maxRetries?: number;
     retryDelay?: number;
@@ -817,6 +818,11 @@ export const streamChatMessage = async (
                   
                   if (parsed.content) {
                     onChunk(parsed.content);
+                  }
+                  
+                  if (parsed.url_mapping) {
+                    console.log('Received URL mapping:', parsed.url_mapping);
+                    onUrlMapping?.(parsed.url_mapping);
                   }
                 }
               } catch (parseError) {

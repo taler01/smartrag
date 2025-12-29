@@ -20,7 +20,9 @@ from app.schemas.document import (
     PersonalDocumentResponse,
     DocumentUploadResponse,
     DocumentListResponse,
-    DocumentDetailResponse
+    DocumentDetailResponse,
+    FolderUploadResponse,
+    FolderUploadResult
 )
 
 router = APIRouter()
@@ -204,6 +206,196 @@ async def upload_document(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"文档上传失败: {str(e)}"
         )
+
+
+@router.post("/upload-folder", response_model=FolderUploadResponse)
+async def upload_folder(
+    files: List[UploadFile] = File(...),
+    type: str = Form(...),  # "public" 或 "personal"
+    permissions: Optional[str] = Form(None),  # JSON字符串，包含角色ID列表
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)):
+    """
+    上传文件夹中的多个文档
+    """
+    logger.info(f"开始文件夹上传: 用户ID={current_user.id}, 文件数量={len(files)}, 文档类型={type}")
+    
+    results = []
+    
+    # 验证文档类型
+    if type not in ["public", "personal"]:
+        logger.warning(f"无效的文档类型: {type} (用户ID={current_user.id})")
+        return FolderUploadResponse(
+            success=False,
+            message=f"无效的文档类型: {type}",
+            results=[]
+        )
+    
+    # 如果是公共文档，验证权限
+    if type == "public" and not permissions:
+        logger.warning(f"公共文档未指定权限 (用户ID={current_user.id})")
+        return FolderUploadResponse(
+            success=False,
+            message="公共文档必须指定权限",
+            results=[]
+        )
+    
+    # 解析权限
+    permission_role_ids = []
+    if permissions:
+        try:
+            permission_role_ids = json.loads(permissions)
+            if not isinstance(permission_role_ids, list):
+                raise ValueError("权限必须是角色ID列表")
+            logger.debug(f"解析权限成功: {permission_role_ids} (用户ID={current_user.id})")
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.error(f"权限解析失败: {str(e)} (用户ID={current_user.id})")
+            return FolderUploadResponse(
+                success=False,
+                message=f"权限格式错误: {str(e)}",
+                results=[]
+            )
+    
+    # 验证文件类型
+    allowed_extensions = ['.txt', '.md', '.json', '.pdf', '.docx', '.doc', '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.svg']
+    
+    # 逐个处理文件
+    for file in files:
+        try:
+            # 验证文件类型
+            file_extension = os.path.splitext(file.filename)[1].lower()
+            if file_extension not in allowed_extensions:
+                logger.warning(f"跳过不支持的文件类型: {file.filename} (用户ID={current_user.id})")
+                results.append(FolderUploadResult(
+                    filename=file.filename,
+                    success=False,
+                    message=f"不支持的文件类型: {file_extension}"
+                ))
+                continue
+            
+            # 保存文件
+            logger.debug(f"开始保存文件: {file.filename} (用户ID={current_user.id})")
+            file_hash, file_path, file_size, file_type, minio_filename, file_url = await file_storage_service.save_file(file, type)
+            logger.info(f"文件保存成功: 哈希={file_hash}, 路径={file_path}, 大小={file_size}字节 (用户ID={current_user.id})")
+            
+            # 检查文件是否已存在
+            if type == "public":
+                existing_doc = db.query(PublicDocument).filter(PublicDocument.file_hash == file_hash).first()
+                if existing_doc:
+                    logger.info(f"公共文档已存在: {file.filename} (哈希: {file_hash})")
+                    results.append(FolderUploadResult(
+                        filename=file.filename,
+                        success=True,
+                        message="文档已存在",
+                        document_id=existing_doc.id,
+                        document_type="public"
+                    ))
+                    continue
+            else:  # personal
+                existing_doc = db.query(PersonalDocument).filter(
+                    PersonalDocument.file_hash == file_hash,
+                    PersonalDocument.owner_id == current_user.id
+                ).first()
+                if existing_doc:
+                    logger.info(f"个人文档已存在: {file.filename} (哈希: {file_hash})")
+                    results.append(FolderUploadResult(
+                        filename=file.filename,
+                        success=True,
+                        message="文档已存在",
+                        document_id=existing_doc.id,
+                        document_type="personal"
+                    ))
+                    continue
+            
+            # 创建数据库记录
+            if type == "public":
+                # 创建公共文档记录
+                new_doc = PublicDocument(
+                    filename=file.filename,
+                    file_path=file_path,
+                    file_size=file_size,
+                    file_type=file_type,
+                    file_hash=file_hash,
+                    minio_filename=minio_filename,
+                    file_url=file_url,
+                    uploader_id=current_user.id,
+                    title=file.filename,
+                    description=None,
+                    is_active=True,
+                    is_processed=False
+                )
+                db.add(new_doc)
+                db.flush()
+                
+                # 添加权限记录
+                for role_id in permission_role_ids:
+                    permission = DocumentPermission(
+                        document_id=new_doc.id,
+                        role_id=role_id,
+                        granted_by=current_user.id
+                    )
+                    db.add(permission)
+                
+                db.commit()
+                
+                logger.info(f"公共文档上传成功: {file.filename} (ID: {new_doc.id}, 用户ID={current_user.id})")
+                
+                results.append(FolderUploadResult(
+                    filename=file.filename,
+                    success=True,
+                    message="上传成功",
+                    document_id=new_doc.id,
+                    document_type="public"
+                ))
+                
+            else:  # personal
+                # 创建个人文档记录
+                new_doc = PersonalDocument(
+                    filename=file.filename,
+                    file_path=file_path,
+                    file_size=file_size,
+                    file_type=file_type,
+                    file_hash=file_hash,
+                    minio_filename=minio_filename,
+                    file_url=file_url,
+                    owner_id=current_user.id,
+                    title=file.filename,
+                    description=None,
+                    is_active=True,
+                    is_processed=False
+                )
+                db.add(new_doc)
+                db.commit()
+                
+                logger.info(f"个人文档上传成功: {file.filename} (ID: {new_doc.id}, 用户ID={current_user.id})")
+                
+                results.append(FolderUploadResult(
+                    filename=file.filename,
+                    success=True,
+                    message="上传成功",
+                    document_id=new_doc.id,
+                    document_type="personal"
+                ))
+                
+        except Exception as e:
+            logger.error(f"文件上传失败: {file.filename}, 错误: {str(e)} (用户ID={current_user.id})")
+            results.append(FolderUploadResult(
+                filename=file.filename,
+                success=False,
+                message=f"上传失败: {str(e)}"
+            ))
+    
+    # 统计成功和失败的数量
+    success_count = sum(1 for r in results if r.success)
+    failed_count = len(results) - success_count
+    
+    logger.info(f"文件夹上传完成: 总数={len(results)}, 成功={success_count}, 失败={failed_count} (用户ID={current_user.id})")
+    
+    return FolderUploadResponse(
+        success=True,
+        message=f"上传完成: 成功 {success_count} 个, 失败 {failed_count} 个",
+        results=results
+    )
 
 
 @router.get("/public", response_model=List[PublicDocumentResponse])
@@ -819,7 +1011,7 @@ async def poll_document_status(track_id: str, knowledge_name: str, document_id: 
     后台轮询文档解析状态
     """
     status_url = "http://10.168.27.191:8888/document/status"
-    max_attempts = 10
+    max_attempts = 20
     poll_interval = 30
     
     try:
@@ -1110,6 +1302,12 @@ async def process_document(
                     track_id = upload_result.get("track_id")
                     message = upload_result.get("message", "")
                     logger.info(f"文档解析请求成功: {message}, track_id: {track_id}")
+                    
+                    # 记录trace_id到数据库
+                    if track_id:
+                        document.trace_id = track_id
+                        db.commit()
+                        logger.info(f"已记录trace_id到数据库: {track_id} (文档ID: {document_id})")
                     
                     # 如果文档已存在且状态为completed，直接标记为已处理
                     if "already exists" in message.lower() and "completed" in message.lower():

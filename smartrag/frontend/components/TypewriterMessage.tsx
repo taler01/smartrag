@@ -17,8 +17,9 @@ const TypewriterMessage: React.FC<TypewriterMessageProps> = ({
   onScrollToBottom,
   userScrolled
 }) => {
-  // 只有最新的AI消息才使用打字机效果
-  const shouldUseTypewriter = message.role === 'model' && isLatestMessage && !isProcessing;
+  // 只有最新的AI消息且不在处理中时才使用打字机效果
+  // 流式输出时直接显示文本，避免抖动
+  const shouldUseTypewriter = message.role === 'model' && isLatestMessage && !isProcessing && message.text.length > 0;
   
   // 创建一个包装函数，根据用户滚动状态决定是否滚动
   const handleScrollToBottom = () => {
